@@ -9,8 +9,10 @@ Dubbo Job Radar is a local-first React app for Josh and Kristy Parris. It scores
 - Manual job paste/import with structured field extraction.
 - CSV import for spreadsheet job leads.
 - Adzuna import through a Vercel serverless endpoint when credentials are configured.
+- Vercel refresh pack that runs the saved query set in one batch.
 - Deduplication by URL or title/employer/location/date.
 - Morning briefing with copy/download actions.
+- Follow-up queue for older questions, applications, and interviews.
 - Application tracker with statuses from New through Accepted/Archived.
 - Email/contact prompt generator for enquiries and applications.
 - Weekly cashflow comparison against Josh's replacement-income target.
@@ -46,11 +48,18 @@ ADZUNA_APP_KEY=your_adzuna_app_key
 
 Do not create `VITE_` Adzuna credentials. Anything prefixed with `VITE_` is exposed to the browser. GitHub Pages will still run the app, but API search will show a configuration message because Pages does not run serverless functions.
 
+The Vercel refresh pack uses `/api/jobs/refresh`, which runs the curated Josh and Kristy search set and returns normalised job leads for the app to import. `vercel.json` also includes cron schedules for 7:00am and 12:30pm Sydney time during AEST:
+
+- `0 21 * * *`
+- `30 2 * * *`
+
+Vercel cron is UTC-based, so these times may need adjustment during daylight saving.
+
 ## Data Source Plan
 
 Phase 1 is local-first: manual paste, CSV import, scoring, tracker, and application helper.
 
-Phase 2 has started with Adzuna search on Vercel. The next backend work is scheduled refresh, durable database storage, and email alert ingestion.
+Phase 2 has started with Adzuna search and refresh-pack endpoints on Vercel. The next backend work is durable database storage, email alert ingestion, and actual notification delivery.
 
 Future phases should use lawful and stable sources only:
 

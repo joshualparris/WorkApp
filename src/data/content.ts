@@ -71,7 +71,12 @@ export const sourcePipeline = [
   {
     name: 'Adzuna API',
     status: 'Live on Vercel',
-    detail: 'Serverless endpoint with API keys kept off the browser. GitHub Pages keeps using manual and CSV imports.',
+    detail: 'Serverless endpoint and refresh pack with API keys kept off the browser. GitHub Pages keeps using manual and CSV imports.',
+  },
+  {
+    name: 'Scheduled refresh',
+    status: 'Vercel cron ready',
+    detail: 'Runs the saved-query refresh endpoint at 7:00am and 12:30pm Sydney time during AEST when hosted on Vercel.',
   },
   {
     name: 'Gmail Job Leads label',

@@ -1,4 +1,14 @@
 {
   "buildCommand": "npm run build",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "crons": [
+    {
+      "path": "/api/jobs/refresh",
+      "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/jobs/refresh",
+      "schedule": "30 2 * * *"
+    }
+  ]
 }
