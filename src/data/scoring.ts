@@ -98,12 +98,14 @@ export function detectAgedCare(text: string): boolean {
 }
 
 export function detectNursingType(text: string): string {
+  if (hasAny(text, ['paediatric', 'pediatric', 'children', "children's ward", 'child and adolescent'])) return 'Paediatric / child health';
   if (hasAny(text, ['practice nurse', 'gp nurse', 'medical centre nurse'])) return 'GP / practice nurse';
   if (hasAny(text, ['immunisation', 'vaccination'])) return 'Immunisation';
-  if (hasAny(text, ['child and family', 'maternal', 'family health'])) return 'Child and family health';
+  if (hasAny(text, ['child and family', 'maternal', 'family health', 'early parenting'])) return 'Child and family health';
   if (hasAny(text, ['community nurse', 'community health', 'primary health'])) return 'Community health';
   if (hasAny(text, ['school nurse'])) return 'School nursing';
-  if (hasAny(text, ['outpatients', 'clinic', 'hospital casual', 'nsw health'])) return 'Clinic / hospital';
+  if (hasAny(text, ['outpatients', 'clinic', 'hospital casual', 'short stay', 'nsw health'])) return 'Clinic / hospital';
+  if (hasAny(text, ['rehabilitation', 'rehab nurse'])) return 'Rehabilitation';
   if (hasAny(text, ['registered nurse', ' rn ', 'registered nurse/rn'])) return 'General RN';
   return '';
 }
@@ -179,10 +181,21 @@ function joshRole(job: JobRecord): ScoreFactor {
       'helpdesk',
       'help desk',
       'service desk',
+      'desktop support',
       'msp',
       'school ict',
       'technology support',
+      'technical support',
       'microsoft 365',
+      'office 365',
+      'google workspace',
+      'google suite',
+      'active directory',
+      'password reset',
+      'device setup',
+      'device deployment',
+      'reimaging',
+      'jira',
       'digital literacy',
       'workplace trainer',
       'trainer assessor',
@@ -193,11 +206,34 @@ function joshRole(job: JobRecord): ScoreFactor {
   ) {
     return factor('role', 'Role fit', 20, 20, 'Strong match for ICT, school technology, support, or training strengths.');
   }
-  if (hasAny(text, ['administration officer', 'admin officer', 'admin assistant', 'customer service', 'school support', 'library assistant', 'data entry'])) {
-    return factor('role', 'Role fit', 16, 20, 'Good fit for admin, school support, library, or customer-facing systems work.');
+  if (
+    hasAny(text, [
+      'administration officer',
+      'admin officer',
+      'admin assistant',
+      'customer service',
+      'customer care',
+      'client services',
+      'student services',
+      'student support',
+      'education administration',
+      'admissions',
+      'enrolment',
+      'records officer',
+      'scheduling officer',
+      'timetabling',
+      'exams officer',
+      'special consideration',
+      'school support',
+      'library assistant',
+      'library services',
+      'data entry',
+    ])
+  ) {
+    return factor('role', 'Role fit', 16, 20, 'Good fit for education admin, student services, school support, library, or customer-facing systems work.');
   }
-  if (hasAny(text, ['operations assistant', 'operations support', 'coordinator', 'systems', 'documentation'])) {
-    return factor('role', 'Role fit', 12, 20, 'Uses organisation, communication, and process skills.');
+  if (hasAny(text, ['operations assistant', 'operations support', 'coordinator', 'systems', 'documentation', 'compliance', 'risk', 'whs', 'stakeholder'])) {
+    return factor('role', 'Role fit', 12, 20, 'Uses organisation, stakeholder communication, compliance, and process-improvement skills.');
   }
   if (hasAny(text, ['factory', 'warehouse', 'packing', 'production', 'day shift'])) {
     return factor('role', 'Role fit', 8, 20, 'Could work as short-term day-shift bridge income.');
@@ -229,7 +265,7 @@ function joshSustainability(job: JobRecord, settings: ProfileSettings): ScoreFac
     const score = settings.joshApprovedAfternoonShift ? 5 : -15;
     return factor('sustainability', 'Health/family sustainability', score, 20, 'Afternoon/evening shifts need explicit approval before they make sense.');
   }
-  if (hasAny(text, ['predictable', 'day shift', 'daytime', 'weekday', 'fixed roster'])) {
+  if (hasAny(text, ['predictable', 'day shift', 'daytime', 'weekday', 'fixed roster', 'office hours', 'business hours'])) {
     return factor('sustainability', 'Health/family sustainability', 20, 20, 'Predictable daytime work protects sleep, home load, and Avance capacity.');
   }
   if (hasAny(text, ['school hours', 'family friendly', 'family-friendly'])) {
@@ -246,14 +282,46 @@ function joshSustainability(job: JobRecord, settings: ProfileSettings): ScoreFac
 
 function joshPathway(job: JobRecord): ScoreFactor {
   const text = lower(getText(job));
-  if (hasAny(text, ['ict', 'it support', 'helpdesk', 'service desk', 'msp', 'school ict', 'microsoft 365', 'classroom tech', 'viewboard'])) {
+  if (
+    hasAny(text, [
+      'ict',
+      'it support',
+      'helpdesk',
+      'service desk',
+      'desktop support',
+      'msp',
+      'school ict',
+      'microsoft 365',
+      'office 365',
+      'active directory',
+      'jira',
+      'classroom tech',
+      'viewboard',
+    ])
+  ) {
     return factor('pathway', 'Long-term pathway', 15, 15, 'Builds the ICT, MSP, school technology, and support pathway.');
   }
   if (hasAny(text, ['trainer', 'training', 'tae', 'digital literacy', 'documentation', 'micro-learning'])) {
     return factor('pathway', 'Long-term pathway', 12, 15, 'Builds the training and digital support pathway.');
   }
-  if (hasAny(text, ['admin', 'customer service', 'operations', 'data entry', 'library'])) {
-    return factor('pathway', 'Long-term pathway', 8, 15, 'Builds general employability and systems confidence.');
+  if (
+    hasAny(text, [
+      'admin',
+      'customer service',
+      'customer care',
+      'client services',
+      'student services',
+      'education administration',
+      'records',
+      'scheduling',
+      'timetabling',
+      'compliance',
+      'operations',
+      'data entry',
+      'library',
+    ])
+  ) {
+    return factor('pathway', 'Long-term pathway', 8, 15, 'Builds education administration, systems, and stakeholder-support credibility.');
   }
   if (hasAny(text, ['factory', 'warehouse', 'packing', 'production'])) {
     return factor('pathway', 'Long-term pathway', 3, 15, 'Mostly a short-term cashflow bridge.');
@@ -278,10 +346,18 @@ function kristyField(job: JobRecord): ScoreFactor {
     hasAny(text, [
       'practice nurse',
       'gp nurse',
+      'paediatric',
+      'pediatric',
+      'children',
+      'child and adolescent',
       'immunisation',
       'child and family',
+      'maternal child',
+      'early parenting',
       'community health',
       'community nurse',
+      'acute care',
+      'short stay',
       'hospital outpatient',
       'outpatients',
       'school nurse',
@@ -290,10 +366,10 @@ function kristyField(job: JobRecord): ScoreFactor {
       'primary health',
     ])
   ) {
-    return factor('field', 'Nursing field fit', 30, 30, 'Excellent match for Kristy nursing preferences.');
+    return factor('field', 'Nursing field fit', 30, 30, 'Excellent match for Kristy nursing preferences and paediatric/family-health experience.');
   }
-  if (hasAny(text, ['hospital casual pool', 'casual pool', 'clinic', 'nsw health'])) {
-    return factor('field', 'Nursing field fit', 24, 30, 'Hospital casual pool or clinic work may fit well.');
+  if (hasAny(text, ['hospital casual pool', 'casual pool', 'clinic', 'nsw health', 'rehabilitation', 'orthopaedic'])) {
+    return factor('field', 'Nursing field fit', 24, 30, 'Hospital, clinic, rehabilitation, or casual-pool work may fit well if it avoids aged care.');
   }
   if (hasAny(text, ['registered nurse', ' rn ', 'rn casual', 'rn part-time', 'rn part time'])) {
     return factor('field', 'Nursing field fit', 18, 30, 'General RN role that may suit if the roster and setting are right.');
@@ -349,11 +425,27 @@ function kristyIncome(job: JobRecord): ScoreFactor {
 
 function kristyValues(job: JobRecord): ScoreFactor {
   const text = lower(getText(job));
-  if (hasAny(text, ['child', 'family health', 'maternal', 'school', 'community health'])) {
-    return factor('values', 'Values/life fit', 15, 15, 'Connects with children, family, school, or community health.');
+  if (
+    hasAny(text, [
+      'paediatric',
+      'pediatric',
+      'child',
+      'adolescent',
+      'family health',
+      'maternal',
+      'early parenting',
+      'school',
+      'community health',
+      'asthma',
+      'respiratory',
+      'parent education',
+      'family education',
+    ])
+  ) {
+    return factor('values', 'Values/life fit', 15, 15, 'Connects with paediatric, family, school, community, or health-education strengths.');
   }
-  if (hasAny(text, ['clinic', 'practice', 'supportive team', 'calm', 'business hours'])) {
-    return factor('values', 'Values/life fit', 12, 15, 'Likely calmer clinic or team environment.');
+  if (hasAny(text, ['clinic', 'practice', 'supportive team', 'multidisciplinary', 'allied health', 'calm', 'business hours'])) {
+    return factor('values', 'Values/life fit', 12, 15, 'Likely calmer clinic or team environment with multidisciplinary support.');
   }
   if (hasAny(text, ['return to practice', 're-entry', 'training provided', 'orientation'])) {
     return factor('values', 'Values/life fit', 8, 15, 'Could be a useful career re-entry pathway.');
@@ -570,21 +662,22 @@ export function makeApplicationDrafts(job: JobRecord): ApplicationDrafts {
         '',
         `Hi ${job.employer || 'there'},`,
         '',
-        `I would like to apply for the ${job.title} role. My background includes Level 1 ICT support, Microsoft 365, service desk and ticketing, school technology support, documentation, and helping non-technical users feel confident with systems.`,
+        `I would like to apply for the ${job.title} role. My background includes Level 1 MSP/ICT support, Microsoft 365 and Google Workspace user support, Active Directory password resets, Jira/service-desk ticketing, school ICT and library support, and education administration.`,
         '',
-        'I am especially interested in practical, predictable work where clear communication, calm troubleshooting, and useful process improvement matter.',
+        'I am especially interested in practical, predictable work where clear communication, calm troubleshooting, stakeholder support, and useful process improvement matter.',
         '',
         'Kind regards,',
         'Josh Parris',
       ].join('\n'),
       resumeAlignment: [
-        'Level 1 ICT / MSP support with Microsoft 365 and user troubleshooting.',
-        'School ICT and classroom technology support, including practical training for staff.',
-        'Customer service, documentation, ticketing, and process improvement.',
-        'Calm support style for non-technical users and busy workplace environments.',
+        'Level 1 MSP/ICT support with Microsoft 365, Google Workspace, Active Directory password resets, device setup, and Windows reimaging.',
+        'School ICT and library support, including teacher support, classroom technology, cataloguing, and practical help for non-technical users.',
+        'Tertiary education customer-care and student-services experience across phone, face-to-face, CRM, Zoom, and cross-department enquiries.',
+        'Scheduling, exams, special-consideration, compliance, stakeholder engagement, documentation, and process-improvement background.',
       ],
       interviewPrep: [
-        'Prepare a short example of fixing a recurring IT issue with clear documentation.',
+        'Prepare a short example of fixing a recurring IT issue with clear documentation or escalation.',
+        'Prepare an education-admin example: scheduling, exams, CRM, compliance, or improving a student/customer process.',
         'Explain Monday/Wednesday commitments clearly and confidently.',
         'Ask how work is triaged, who provides escalation, and how busy periods are handled.',
       ],
@@ -615,23 +708,24 @@ export function makeApplicationDrafts(job: JobRecord): ApplicationDrafts {
       '',
       `Hi ${job.employer || 'there'},`,
       '',
-      `I would like to apply for the ${job.title} role. I am a Registered Nurse interested in part-time or casual work that is family-friendly and based in a clinic, community, hospital, school, or similar setting.`,
+      `I would like to apply for the ${job.title} role. I am a Registered Nurse with strong paediatric acute-care experience, family communication skills, multidisciplinary teamwork, and a background that also includes inpatient rehabilitation and orthopaedic nursing.`,
       '',
-      'I would welcome the opportunity to discuss available shifts, team expectations, and how the role supports safe, sustainable nursing work.',
+      'I would welcome the opportunity to discuss available shifts, team expectations, and how the role supports safe, sustainable nursing work in a clinic, community, hospital, school, or similar non-aged-care setting.',
       '',
       'Kind regards,',
       'Kristy Parris',
     ].join('\n'),
     resumeAlignment: [
-      'Registered Nurse qualification and patient-care experience.',
-      'Interest in clinic, community, child/family health, school, immunisation, or outpatient settings.',
-      'Clear preference for safe, family-friendly part-time or casual rosters.',
-      'Professional communication with patients, families, and multidisciplinary teams.',
+      'Registered Nurse with substantial paediatric children\'s ward experience and acute child/adolescent assessment skills.',
+      'Parent and family education experience, including medication guidance, asthma management, reassurance, and home safety-netting.',
+      'Clinical skills across wound care, respiratory/neurological/neurovascular observations, dehydration care, IV/NGT rehydration support, and escalation of deterioration.',
+      'Inpatient rehabilitation, orthopaedic, multidisciplinary-team, and reflective practice background.',
+      'Clear preference for safe, family-friendly part-time or casual rosters outside residential aged care.',
     ],
     interviewPrep: [
       'Clarify the clinical setting and whether there is any aged-care component.',
       'Ask about shift length, rostering notice, and ability to decline unsuitable shifts.',
-      'Prepare examples of calm patient communication and safe escalation.',
+      'Prepare examples of paediatric assessment, parent education, asthma/respiratory care, and safe escalation.',
     ],
     acceptanceQuestions: [
       'Is this role part-time, casual, or a pathway to fixed hours?',
