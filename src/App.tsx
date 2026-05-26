@@ -53,7 +53,7 @@ import {
   parseJobText,
   scoreJob,
 } from './data/scoring';
-import { queryAdzunaJobs } from './data/adzuna';
+import { queryAdzunaJobs, refreshJobPack } from './data/adzuna';
 import {
   JOB_STATUSES,
   JobDraft,
@@ -67,10 +67,10 @@ import {
 
 const JOBS_KEY = 'dubbo-job-radar:jobs:v1';
 const SETTINGS_KEY = 'dubbo-job-radar:settings:v1';
-const canSearchAdzunaDirect = Boolean(import.meta.env.VITE_ADZUNA_APP_ID && import.meta.env.VITE_ADZUNA_API_KEY);
 
 type ViewId = 'dashboard' | 'inbox' | 'tracker' | 'helper' | 'cashflow' | 'settings';
 type TargetFilter = 'all' | ProfileTarget;
+type RefreshTarget = 'all' | ProfileTarget;
 
 interface Filters {
   target: TargetFilter;
@@ -169,6 +169,26 @@ const formatDate = (value: string) => {
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const statusOrder: JobStatus[] = ['New', 'Shortlisted', 'Asked Question', 'Applied', 'Interview', 'Accepted', 'Rejected', 'Archived'];
+
+function daysSince(value: string): number {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 0;
+  return Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function isFollowUpDue(job: JobRecord): boolean {
+  if (job.status === 'Asked Question') return daysSince(job.updatedAt || job.createdAt) >= 2;
+  if (job.status === 'Applied') return daysSince(job.updatedAt || job.createdAt) >= 5;
+  if (job.status === 'Interview') return daysSince(job.updatedAt || job.createdAt) >= 1;
+  return false;
+}
+
+function followUpReason(job: JobRecord): string {
+  if (job.status === 'Asked Question') return 'Question sent more than 2 days ago.';
+  if (job.status === 'Applied') return 'Application has been sitting for 5+ days.';
+  if (job.status === 'Interview') return 'Interview stage should be checked promptly.';
+  return 'No follow-up needed yet.';
+}
 
 const CsvHeaderMap: Record<string, keyof JobDraft | 'profile'> = {
   profile: 'profile',
@@ -382,6 +402,23 @@ function makeEvidencePack(jobs: JobRecord[], settings: ProfileSettings): string 
   return lines.join('\n');
 }
 
+function makeFollowUpMessage(job: JobRecord): string {
+  const greeting = job.employer && job.employer !== 'Unknown employer' ? `Hi ${job.employer} team,` : 'Hi there,';
+  const context =
+    job.status === 'Asked Question'
+      ? `I recently sent a question about the ${job.title} role and wanted to gently follow up.`
+      : job.status === 'Interview'
+        ? `Thank you again for discussing the ${job.title} role with me. I wanted to follow up on the next steps.`
+        : `I recently applied for the ${job.title} role and wanted to check whether there are any updates or further details I can provide.`;
+
+  const profileLine =
+    job.profileTarget === 'josh'
+      ? 'I am especially interested in whether the role can work around Thursday/Friday day-shift availability.'
+      : 'I am especially interested in confirming the roster, setting, and family-friendly fit for the role.';
+
+  return [greeting, '', context, profileLine, '', 'Kind regards,', PROFILE_LABELS[job.profileTarget] === 'Josh' ? 'Josh Parris' : 'Kristy Parris'].join('\n');
+}
+
 function App() {
   const [jobs, setJobs] = useState<JobRecord[]>(() => loadJobs());
   const [settings, setSettings] = useState<ProfileSettings>(() => loadSettings());
@@ -482,6 +519,7 @@ function App() {
       joshBest: active.filter((job) => job.profileTarget === 'josh').sort((a, b) => b.matchScore - a.matchScore).slice(0, 5),
       kristyBest: active.filter((job) => job.profileTarget === 'kristy').sort((a, b) => b.matchScore - a.matchScore).slice(0, 5),
       needsQuestion: active.filter((job) => job.fitLabel === 'Ask questions first'),
+      followUps: active.filter((job) => isFollowUpDue(job)).sort((a, b) => b.matchScore - a.matchScore),
       recent: active.filter((job) => {
         const created = new Date(job.createdAt);
         return Date.now() - created.getTime() <= 1000 * 60 * 60 * 24;
@@ -648,6 +686,7 @@ function Dashboard({
     joshBest: JobRecord[];
     kristyBest: JobRecord[];
     needsQuestion: JobRecord[];
+    followUps: JobRecord[];
     recent: JobRecord[];
     closing: number;
     newCount: number;
@@ -680,11 +719,34 @@ function Dashboard({
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-4">
         <SignalBox icon={CalendarClock} title="Urgent Closing Soon" value={stats.closing.toString()} tone="amber" />
         <SignalBox icon={Activity} title="New Since Yesterday" value={stats.recent.length.toString()} tone="sky" />
         <SignalBox icon={HelpCircle} title="Questions First" value={stats.needsQuestion.length.toString()} tone="rose" />
+        <SignalBox icon={Mail} title="Follow Ups Due" value={stats.followUps.length.toString()} tone="violet" />
       </section>
+
+      {stats.followUps.length > 0 && (
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <SectionTitle icon={Mail} title="Follow-Up Queue" />
+            <span className="text-sm text-slate-500">Use the Helper tab to copy a follow-up note</span>
+          </div>
+          <div className="space-y-3">
+            {stats.followUps.slice(0, 5).map((job) => (
+              <div key={job.id} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="font-medium text-slate-950">{job.title}</div>
+                    <div className="text-sm text-slate-600">{job.employer} - {followUpReason(job)}</div>
+                  </div>
+                  <ActionButton icon={Mail} label="Open Helper" tone="slate" onClick={() => onSelect(job.id)} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -706,11 +768,12 @@ function SectionTitle({ icon: Icon, title }: { icon: LucideIcon; title: string }
   );
 }
 
-function SignalBox({ icon: Icon, title, value, tone }: { icon: LucideIcon; title: string; value: string; tone: 'amber' | 'sky' | 'rose' }) {
+function SignalBox({ icon: Icon, title, value, tone }: { icon: LucideIcon; title: string; value: string; tone: 'amber' | 'sky' | 'rose' | 'violet' }) {
   const classes = {
     amber: 'border-amber-200 bg-amber-50 text-amber-900',
     sky: 'border-sky-200 bg-sky-50 text-sky-900',
     rose: 'border-rose-200 bg-rose-50 text-rose-900',
+    violet: 'border-violet-200 bg-violet-50 text-violet-900',
   };
   return (
     <div className={`flex items-center justify-between rounded-lg border p-4 ${classes[tone]}`}>
@@ -920,6 +983,9 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
   const [adzunaTarget, setAdzunaTarget] = useState<ProfileTarget>('josh');
   const [adzunaResults, setAdzunaResults] = useState<JobDraft[]>([]);
   const [adzunaStatus, setAdzunaStatus] = useState('Ready to search');
+  const [refreshTarget, setRefreshTarget] = useState<RefreshTarget>('all');
+  const [refreshResults, setRefreshResults] = useState<JobDraft[]>([]);
+  const [refreshStatus, setRefreshStatus] = useState('Ready to run Vercel refresh pack');
 
   const updateDraft = (patch: Partial<JobDraft>) => setDraft((current) => ({ ...current, ...patch }));
 
@@ -963,6 +1029,24 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
   const importAllAdzuna = () => {
     adzunaResults.forEach((draftItem) => upsertJob(createJobFromDraft(draftItem, settings)));
     setAdzunaStatus(`Imported ${adzunaResults.length} Adzuna leads`);
+  };
+
+  const runRefreshPack = async () => {
+    setRefreshStatus('Running saved query refresh pack...');
+    try {
+      const response = await refreshJobPack(refreshTarget, adzunaLocation, settings.radiusKm);
+      const jobs = response.jobs ?? [];
+      setRefreshResults(jobs);
+      setRefreshStatus(response.summary ?? `${jobs.length} leads returned from ${response.queryCount ?? 0} saved searches`);
+    } catch (error) {
+      setRefreshResults([]);
+      setRefreshStatus(error instanceof Error ? error.message : 'Unable to run the refresh pack');
+    }
+  };
+
+  const importRefreshPack = () => {
+    refreshResults.forEach((draftItem) => upsertJob(createJobFromDraft(draftItem, settings)));
+    setRefreshStatus(`Imported ${refreshResults.length} refresh-pack leads`);
   };
 
   const quickQueries = searchQueries.filter((query) => query.profileTarget === adzunaTarget).slice(0, 8);
@@ -1018,6 +1102,55 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
       <div className="space-y-6">
         <section className="rounded-lg border border-slate-200 bg-white p-4">
           <div className="mb-4 flex items-center justify-between gap-3">
+            <SectionTitle icon={RefreshCw} title="Vercel Refresh Pack" />
+            <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">Batch search</span>
+          </div>
+          <div className="grid gap-3">
+            <select
+              value={refreshTarget}
+              onChange={(event) => setRefreshTarget(event.target.value as RefreshTarget)}
+              className="min-h-10 rounded-md border border-slate-300 px-3 text-sm"
+              aria-label="Refresh target"
+            >
+              <option value="all">Josh + Kristy</option>
+              <option value="josh">Josh only</option>
+              <option value="kristy">Kristy only</option>
+            </select>
+            <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              Runs a curated set of saved searches through the Vercel backend. Keys stay server-side.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <ActionButton icon={RefreshCw} label="Run Pack" tone="green" onClick={() => void runRefreshPack()} />
+              <ActionButton icon={Plus} label="Import Pack" tone="sky" onClick={importRefreshPack} />
+            </div>
+            <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{refreshStatus}</p>
+          </div>
+          {refreshResults.length > 0 && (
+            <div className="mt-4 space-y-3">
+              {refreshResults.slice(0, 8).map((result) => (
+                <div key={`${result.profileTarget}-${result.title}-${result.employer}-${result.url}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-slate-950">{result.title}</div>
+                      <div className="text-sm text-slate-600">{PROFILE_LABELS[result.profileTarget]} - {result.employer || 'Unknown employer'}</div>
+                      <div className="mt-1 text-xs text-slate-500">{result.location}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => upsertJob(createJobFromDraft(result, settings))}
+                      className="shrink-0 rounded-md border border-emerald-600 bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-700"
+                    >
+                      Import
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <SectionTitle icon={RefreshCw} title="Adzuna API Search" />
             <span className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-800">Vercel serverless</span>
           </div>
@@ -1034,10 +1167,7 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
             <TextInput label="Search query" value={adzunaQuery} onChange={setAdzunaQuery} />
             <TextInput label="Location" value={adzunaLocation} onChange={setAdzunaLocation} />
             <p className="text-xs text-slate-500">
-              {canSearchAdzunaDirect
-                ? 'Direct Adzuna search is enabled through VITE_ADZUNA_APP_ID and VITE_ADZUNA_API_KEY.'
-                : 'No direct Adzuna keys found; the app will use the serverless proxy if configured.'}
-              {' '}Search radius: {settings.radiusKm} km.
+              Uses the Vercel serverless proxy only. Search radius: {settings.radiusKm} km.
             </p>
             <div className="flex flex-wrap gap-2">
               <ActionButton icon={Search} label="Search Adzuna" tone="green" onClick={() => void searchAdzuna()} />
@@ -1333,6 +1463,7 @@ function HelperView({
       <section className="space-y-4">
         <DraftPanel title="Short Enquiry Email" value={drafts.enquiryEmail} onCopy={() => copy('Enquiry email', drafts.enquiryEmail)} />
         <DraftPanel title="Application Email" value={drafts.applicationEmail} onCopy={() => copy('Application email', drafts.applicationEmail)} />
+        <DraftPanel title="Follow-Up Message" value={makeFollowUpMessage(selectedJob)} onCopy={() => copy('Follow-up message', makeFollowUpMessage(selectedJob))} />
         <ChecklistPanel title="Resume Bullet Alignment" items={drafts.resumeAlignment} />
         <ChecklistPanel title="Interview Prep Notes" items={drafts.interviewPrep} />
         <ChecklistPanel title="Questions Before Accepting" items={drafts.acceptanceQuestions} />
