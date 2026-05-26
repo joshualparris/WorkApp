@@ -1,0 +1,94 @@
+import { ExternalLink, Mail, MessagesSquare, ShieldCheck, Sparkles } from 'lucide-react';
+import type { JobRecord } from '../types';
+
+interface JobDetailProps {
+  job: JobRecord;
+  onUpdateStatus: (jobId: string, status: JobRecord['status']) => void;
+  onSaveNotes: (jobId: string, notes: string) => void;
+}
+
+const statusOptions: JobRecord['status'][] = ['New', 'Shortlisted', 'Asked Question', 'Applied', 'Interview', 'Rejected', 'Accepted', 'Archived'];
+
+export function JobDetail({ job, onUpdateStatus, onSaveNotes }: JobDetailProps) {
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{job.title}</p>
+          <p className="text-sm text-slate-600">{job.employer} · {job.location}</p>
+        </div>
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-800">Status: {job.status}</span>
+      </div>
+      <div className="grid gap-6">
+        <div className="grid gap-3 rounded-3xl bg-slate-50 p-5">
+          <p className="text-sm font-semibold text-slate-900">Match summary</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-3xl bg-white p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Score</p>
+              <p className="mt-2 text-3xl font-semibold text-slate-900">{job.matchScore}</p>
+            </div>
+            <div className="rounded-3xl bg-white p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Fit outcome</p>
+              <p className="mt-2 text-xl font-semibold text-slate-900">{job.fitLabel}</p>
+            </div>
+          </div>
+          <p className="text-sm text-slate-700"><Sparkles className="inline h-4 w-4 align-text-bottom text-emerald-500" /> {job.fitReason}</p>
+          <p className="text-sm text-slate-700"><ShieldCheck className="inline h-4 w-4 align-text-bottom text-slate-500" /> {job.biggestConcern}</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="rounded-3xl bg-slate-50 p-5">
+            <p className="text-sm font-semibold text-slate-900">Application prompt</p>
+            <p className="mt-2 text-sm text-slate-700">{job.questionToAsk}</p>
+          </div>
+          <div className="rounded-3xl bg-slate-50 p-5">
+            <p className="text-sm font-semibold text-slate-900">Next action</p>
+            <p className="mt-2 text-sm text-slate-700">{job.nextAction}</p>
+          </div>
+        </div>
+        <div className="grid gap-3 rounded-3xl bg-slate-50 p-5">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-slate-900">Application helper</p>
+            <a href={job.url || '#'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-slate-700 hover:text-slate-900">
+              <ExternalLink className="h-4 w-4" /> Open link
+            </a>
+          </div>
+          <div className="grid gap-3">
+            <div className="rounded-3xl bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold text-slate-900">Short enquiry email</p>
+              <p className="mt-2 text-sm text-slate-700">Hello, I am interested in this role and would like to confirm whether it can be worked on Thursdays/Fridays and whether it is a predictable day-shift arrangement compatible with existing Monday/Wednesday commitments.</p>
+            </div>
+            <div className="rounded-3xl bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold text-slate-900">Application note</p>
+              <p className="mt-2 text-sm text-slate-700">This role appears to fit the profile well. Highlight customer service, Microsoft 365 support, classroom tech experience, and availability for Thursday/Friday day shifts.</p>
+            </div>
+            <div className="rounded-3xl bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold text-slate-900">Interview prep</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                <li>Explain how your current Avance IT role is stable and why you are only available Thu/Fri.</li>
+                <li>Describe your experience with helpdesk, Microsoft 365, and training non-technical users.</li>
+                <li>Ask about roster predictability, coaching support, and shift expectations.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div className="grid gap-3 rounded-3xl bg-slate-50 p-5">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-slate-900">Workflow updates</p>
+          </div>
+          <label className="block text-sm font-medium text-slate-700">
+            Change status
+            <select value={job.status} onChange={(event) => onUpdateStatus(job.id, event.target.value as JobRecord['status'])} className="mt-2 block w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200">
+              {statusOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            Notes
+            <textarea value={job.notes} onChange={(event) => onSaveNotes(job.id, event.target.value)} rows={4} className="mt-2 block w-full rounded-3xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200" />
+          </label>
+        </div>
+      </div>
+    </section>
+  );
+}
