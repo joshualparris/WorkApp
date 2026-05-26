@@ -13,6 +13,13 @@ interface RefreshResponse extends AdzunaSearchResponse {
   queryCount?: number;
 }
 
+export interface JobIntegrationStatus {
+  adzunaConfigured: boolean;
+  hasAppId: boolean;
+  hasAppKey: boolean;
+  checkedAt: string;
+}
+
 async function readJsonResponse<T extends { error?: string }>(response: Response, fallbackError: string): Promise<T> {
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
@@ -61,6 +68,20 @@ export async function refreshJobPack(target: RefreshTarget, location: string, ra
 
   if (!response.ok) {
     throw new Error(payload.error ?? 'Unable to run the Vercel refresh pack.');
+  }
+
+  return payload;
+}
+
+export async function checkJobIntegrations(): Promise<JobIntegrationStatus> {
+  const response = await fetch('/api/jobs/status');
+  const payload = await readJsonResponse<JobIntegrationStatus & { error?: string }>(
+    response,
+    'Integration status is only available when deployed with the Vercel serverless API.'
+  );
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? 'Unable to check job integrations.');
   }
 
   return payload;

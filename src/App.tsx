@@ -53,7 +53,7 @@ import {
   parseJobText,
   scoreJob,
 } from './data/scoring';
-import { queryAdzunaJobs, refreshJobPack } from './data/adzuna';
+import { checkJobIntegrations, queryAdzunaJobs, refreshJobPack } from './data/adzuna';
 import {
   JOB_STATUSES,
   JobDraft,
@@ -986,6 +986,7 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
   const [refreshTarget, setRefreshTarget] = useState<RefreshTarget>('all');
   const [refreshResults, setRefreshResults] = useState<JobDraft[]>([]);
   const [refreshStatus, setRefreshStatus] = useState('Ready to run Vercel refresh pack');
+  const [integrationStatus, setIntegrationStatus] = useState('Integration status not checked yet');
 
   const updateDraft = (patch: Partial<JobDraft>) => setDraft((current) => ({ ...current, ...patch }));
 
@@ -1049,6 +1050,20 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
     setRefreshStatus(`Imported ${refreshResults.length} refresh-pack leads`);
   };
 
+  const checkIntegrations = async () => {
+    setIntegrationStatus('Checking Vercel environment variables...');
+    try {
+      const status = await checkJobIntegrations();
+      setIntegrationStatus(
+        status.adzunaConfigured
+          ? 'Adzuna is configured on Vercel.'
+          : `Adzuna is not fully configured. App ID: ${status.hasAppId ? 'yes' : 'no'}, App key: ${status.hasAppKey ? 'yes' : 'no'}.`
+      );
+    } catch (error) {
+      setIntegrationStatus(error instanceof Error ? error.message : 'Unable to check integrations.');
+    }
+  };
+
   const quickQueries = searchQueries.filter((query) => query.profileTarget === adzunaTarget).slice(0, 8);
 
   return (
@@ -1106,6 +1121,19 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
             <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">Batch search</span>
           </div>
           <div className="grid gap-3">
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-slate-700">{integrationStatus}</p>
+                <button
+                  type="button"
+                  onClick={() => void checkIntegrations()}
+                  className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                  Check
+                </button>
+              </div>
+            </div>
             <select
               value={refreshTarget}
               onChange={(event) => setRefreshTarget(event.target.value as RefreshTarget)}
