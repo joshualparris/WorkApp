@@ -1,5 +1,7 @@
 import {
   ApplicationDrafts,
+  ExtractedFieldConfidence,
+  FieldConfidenceLevel,
   JobDraft,
   JobFitLabel,
   JobRecord,
@@ -94,7 +96,12 @@ export function isClosingSoon(job: JobRecord, today = new Date()): boolean {
 }
 
 export function detectAgedCare(text: string): boolean {
-  return hasAny(text, agedCareKeywords);
+  const normalised = lower(text);
+  const negatedAgedCare =
+    /\b(?:not|no|non|without)\s+(?:residential\s+)?aged\s+care\b/i.test(normalised) ||
+    /\bnot\s+(?:a\s+)?(?:nursing\s+home|racf)\b/i.test(normalised) ||
+    /\bno\s+(?:nursing\s+home|racf)\b/i.test(normalised);
+  return !negatedAgedCare && hasAny(text, agedCareKeywords);
 }
 
 export function detectNursingType(text: string): string {
@@ -110,27 +117,142 @@ export function detectNursingType(text: string): string {
   return '';
 }
 
-export function estimateWeeklyIncome(job: Pick<JobRecord, 'payRate' | 'salaryText' | 'description' | 'hours' | 'profileTarget'>): number | null {
+export interface PayEstimate {
+  weekly: number | null;
+  assumption: string;
+  confidence: FieldConfidenceLevel;
+}
+
+function parseMoneyAmount(value: string, suffix = ''): number {
+  const amount = Number.parseFloat(value.replace(/,/g, ''));
+  if (!Number.isFinite(amount)) return 0;
+  return suffix.toLowerCase() === 'k' ? amount * 1000 : amount;
+}
+
+function explicitWeeklyHours(text: string): number | null {
+  const match = text.match(/(\d{1,2}(?:\.\d+)?)\s*(?:hours|hrs|hr)\s*(?:per\s*week|weekly|p\/w|pw)?/i);
+  return match ? Number.parseFloat(match[1]) : null;
+}
+
+export function parsePayEstimate(job: Pick<JobRecord, 'payRate' | 'salaryText' | 'description' | 'hours' | 'profileTarget'>): PayEstimate {
   const text = [job.payRate, job.salaryText, job.description, job.hours].join(' ');
-  const hourlyMatch = text.match(/\$?\s*(\d{2,3})(?:\.\d{1,2})?\s*(?:per\s*hour|\/\s*hour|p\/h|ph|\/hr|hr|hourly)/i);
-  const weeklyMatch = text.match(/\$?\s*(\d{3,4})(?:\.\d{1,2})?\s*(?:per\s*week|\/\s*week|weekly)/i);
-  const explicitHours = text.match(/(\d{1,2})(?:\.\d)?\s*(?:hours|hrs|hr)\s*(?:per\s*week|weekly|p\/w|pw)?/i);
+  const fallbackHours = job.profileTarget === 'josh' ? 15 : 16;
+  const hours = explicitWeeklyHours(text) ?? fallbackHours;
+  const hourUnit = '(?:per\\s*(?:hour|hr)|an\\s*(?:hour|hr)|\\/\\s*(?:hour|hr)|p\\/h|ph|hourly|hr\\b)';
+  const weekUnit = '(?:per\\s*(?:week|wk)|\\/\\s*(?:week|wk)|weekly|p\\/w|pw)';
+  const annualUnit = '(?:per\\s*(?:annum|year)|p\\.?a\\.?|annual|annually|salary)';
+  const hourlyRange = new RegExp(`\\$?\\s*(\\d{2,3}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\s*(?:-|to|\\u2013)\\s*\\$?\\s*(\\d{2,3}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\s*${hourUnit}`, 'i');
+  const hourlySingle = new RegExp(`\\$?\\s*(\\d{2,3}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\s*${hourUnit}`, 'i');
+  const weeklyRange = new RegExp(`\\$?\\s*(\\d{3,4}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\s*(?:-|to|\\u2013)\\s*\\$?\\s*(\\d{3,4}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\s*${weekUnit}`, 'i');
+  const weeklySingle = new RegExp(`\\$?\\s*(\\d{3,4}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\s*${weekUnit}`, 'i');
+  const annualRange = new RegExp(`\\$?\\s*(\\d{2,3}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\s*(k)?\\s*(?:-|to|\\u2013)\\s*\\$?\\s*(\\d{2,3}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\s*(k)?\\s*${annualUnit}`, 'i');
+  const annualSingle = new RegExp(`\\$?\\s*(\\d{2,3}(?:,\\d{3})*(?:\\.\\d{1,2})?)\\s*(k)?\\s*${annualUnit}`, 'i');
 
-  if (weeklyMatch) {
-    return Number(weeklyMatch[1]);
+  const hourlyRangeMatch = text.match(hourlyRange);
+  if (hourlyRangeMatch) {
+    const low = parseMoneyAmount(hourlyRangeMatch[1]);
+    const high = parseMoneyAmount(hourlyRangeMatch[2]);
+    const midpoint = (low + high) / 2;
+    return {
+      weekly: Math.round(midpoint * hours),
+      assumption: `$${midpoint.toFixed(2)}/hr midpoint x ${hours} hrs/week`,
+      confidence: 'high',
+    };
   }
 
-  if (hourlyMatch) {
-    const hourly = Number(hourlyMatch[1]);
-    const fallbackHours = job.profileTarget === 'josh' ? 15 : 16;
-    const hours = explicitHours ? Number(explicitHours[1]) : fallbackHours;
-    return Math.round(hourly * hours);
+  const hourlySingleMatch = text.match(hourlySingle);
+  if (hourlySingleMatch) {
+    const rate = parseMoneyAmount(hourlySingleMatch[1]);
+    return {
+      weekly: Math.round(rate * hours),
+      assumption: `$${rate.toFixed(2)}/hr x ${hours} hrs/week`,
+      confidence: explicitWeeklyHours(text) ? 'high' : 'medium',
+    };
   }
 
-  if (hasAny(text, ['$500', '$550', '$600', '$650', '$700', '$800', '$900'])) return 500;
-  if (hasAny(text, ['$400', '$450'])) return 400;
-  if (hasAny(text, ['$250', '$300', '$350'])) return 300;
-  return null;
+  const weeklyRangeMatch = text.match(weeklyRange);
+  if (weeklyRangeMatch) {
+    const midpoint = (parseMoneyAmount(weeklyRangeMatch[1]) + parseMoneyAmount(weeklyRangeMatch[2])) / 2;
+    return { weekly: Math.round(midpoint), assumption: 'weekly pay range midpoint', confidence: 'high' };
+  }
+
+  const weeklySingleMatch = text.match(weeklySingle);
+  if (weeklySingleMatch) {
+    return { weekly: Math.round(parseMoneyAmount(weeklySingleMatch[1])), assumption: 'listed weekly pay', confidence: 'high' };
+  }
+
+  const annualRangeMatch = text.match(annualRange);
+  if (annualRangeMatch) {
+    const low = parseMoneyAmount(annualRangeMatch[1], annualRangeMatch[2] || '');
+    const high = parseMoneyAmount(annualRangeMatch[3], annualRangeMatch[4] || annualRangeMatch[2] || '');
+    const midpoint = (low + high) / 2;
+    if (midpoint >= 1000) {
+      return { weekly: Math.round(midpoint / 52), assumption: 'annual salary range midpoint divided by 52', confidence: 'medium' };
+    }
+  }
+
+  const annualSingleMatch = text.match(annualSingle);
+  if (annualSingleMatch) {
+    const annual = parseMoneyAmount(annualSingleMatch[1], annualSingleMatch[2] || '');
+    if (annual >= 1000) {
+      return { weekly: Math.round(annual / 52), assumption: 'annual salary divided by 52', confidence: 'medium' };
+    }
+  }
+
+  if (hasAny(text, ['$500', '$550', '$600', '$650', '$700', '$800', '$900'])) return { weekly: 500, assumption: 'rough weekly amount detected', confidence: 'low' };
+  if (hasAny(text, ['$400', '$450'])) return { weekly: 400, assumption: 'rough weekly amount detected', confidence: 'low' };
+  if (hasAny(text, ['$250', '$300', '$350'])) return { weekly: 300, assumption: 'rough weekly amount detected', confidence: 'low' };
+  return { weekly: null, assumption: 'pay not listed or not recognised', confidence: 'low' };
+}
+
+export function estimateWeeklyIncome(job: Pick<JobRecord, 'payRate' | 'salaryText' | 'description' | 'hours' | 'profileTarget'>): number | null {
+  return parsePayEstimate(job).weekly;
+}
+
+export function extractPayText(raw: string): string {
+  const patterns = [
+    /\$?\s*\d{2,3}(?:,\d{3})*(?:\.\d{1,2})?\s*(?:-|to|\u2013)\s*\$?\s*\d{2,3}(?:,\d{3})*(?:\.\d{1,2})?\s*(?:per\s*(?:hour|hr)|an\s*(?:hour|hr)|\/\s*(?:hour|hr)|p\/h|ph|hourly|hr\b)/i,
+    /\$?\s*\d{2,3}(?:,\d{3})*(?:\.\d{1,2})?\s*(?:per\s*(?:hour|hr)|an\s*(?:hour|hr)|\/\s*(?:hour|hr)|p\/h|ph|hourly|hr\b)/i,
+    /\$?\s*\d{3,4}(?:,\d{3})*(?:\.\d{1,2})?\s*(?:-|to|\u2013)\s*\$?\s*\d{3,4}(?:,\d{3})*(?:\.\d{1,2})?\s*(?:per\s*(?:week|wk)|\/\s*(?:week|wk)|weekly|p\/w|pw)/i,
+    /\$?\s*\d{3,4}(?:,\d{3})*(?:\.\d{1,2})?\s*(?:per\s*(?:week|wk)|\/\s*(?:week|wk)|weekly|p\/w|pw)/i,
+    /\$?\s*\d{2,3}(?:,\d{3})*(?:\.\d{1,2})?\s*k?\s*(?:-|to|\u2013)\s*\$?\s*\d{2,3}(?:,\d{3})*(?:\.\d{1,2})?\s*k?\s*(?:per\s*(?:annum|year)|p\.?a\.?|annual|annually|salary)/i,
+    /\$?\s*\d{2,3}(?:,\d{3})*(?:\.\d{1,2})?\s*k?\s*(?:per\s*(?:annum|year)|p\.?a\.?|annual|annually|salary)/i,
+  ];
+  return patterns.map((pattern) => raw.match(pattern)?.[0] ?? '').find(Boolean) ?? '';
+}
+
+function confidenceFromValue(value: string, fallbackLowValues: string[] = []): FieldConfidenceLevel {
+  const text = compact(value);
+  if (!text || fallbackLowValues.some((fallback) => lower(text) === lower(fallback))) return 'low';
+  return text.length > 2 ? 'high' : 'medium';
+}
+
+export function buildFieldConfidence(job: Pick<JobRecord, 'title' | 'employer' | 'location' | 'payRate' | 'salaryText' | 'description' | 'hours' | 'daysRequired' | 'shiftPattern' | 'workType' | 'closingDate' | 'profileTarget'>): ExtractedFieldConfidence {
+  const text = [job.description, job.workType, job.hours, job.daysRequired, job.shiftPattern].join(' ');
+  const pay = parsePayEstimate(job);
+  const hasRosterSignal = hasAny(text, ['day shift', 'night shift', 'afternoon shift', 'evening shift', 'roster', 'casual', 'part-time', 'part time', 'full-time', 'weekday', 'school hours', 'business hours']);
+  const hasDaySignal = dayNames.some((day) => lower([job.daysRequired, text].join(' ')).includes(day)) || hasAny(text, ['2 days', 'two days', 'weekdays', 'monday to friday', 'mon-fri']);
+  return {
+    title: confidenceFromValue(job.title, ['Untitled job lead', 'Adzuna job lead']),
+    employer: confidenceFromValue(job.employer, ['Unknown employer']),
+    location: confidenceFromValue(job.location, ['']),
+    pay: pay.weekly === null ? 'low' : pay.confidence,
+    roster: job.shiftPattern || hasRosterSignal ? 'medium' : 'low',
+    days: job.daysRequired || hasDaySignal ? 'medium' : 'low',
+    closingDate: job.closingDate ? 'high' : 'low',
+  };
+}
+
+export function confidenceSummary(job: Pick<JobRecord, 'profileTarget' | 'scoreBreakdown' | 'extractedFieldConfidence'>): string {
+  const confidence =
+    job.extractedFieldConfidence ??
+    ({ title: 'low', employer: 'low', location: 'low', pay: 'low', roster: 'low', days: 'low', closingDate: 'low' } as ExtractedFieldConfidence);
+  if (job.profileTarget === 'kristy' && job.scoreBreakdown.agedCareViolation) return 'Aged-care risk';
+  if (confidence.roster === 'low' || confidence.days === 'low') return 'Needs roster confirmation';
+  if (confidence.pay === 'low') return 'Pay unclear';
+  if (confidence.location === 'low') return 'Location unclear';
+  if (Object.values(confidence).every((value) => value === 'high' || value === 'medium')) return 'High confidence';
+  return 'Needs confirmation';
 }
 
 function factor(key: string, label: string, score: number, max: number, note: string): ScoreFactor {
@@ -144,6 +266,7 @@ function clampScore(value: number): number {
 function labelFromScore(score: number, forcedAvoid: boolean, needsQuestions: boolean): JobFitLabel {
   if (forcedAvoid) return 'Avoid';
   if (score >= 82 && !needsQuestions) return 'Apply now';
+  if (needsQuestions && score >= 45) return 'Ask questions first';
   if (score >= 66) return 'Ask questions first';
   if (score >= 50) return 'Maybe';
   if (score >= 30) return 'Poor fit';
@@ -152,10 +275,22 @@ function labelFromScore(score: number, forcedAvoid: boolean, needsQuestions: boo
 
 function joshAvailability(job: JobRecord): ScoreFactor {
   const text = lower(getText(job));
-  const requiresMonWed =
-    hasAny(text, ['monday to friday', 'mon-fri', 'monday-friday', 'weekday roster']) ||
-    hasAny(text, ['monday required', 'wednesday required', 'available mondays', 'available wednesdays']);
-  const fullAvailability = hasAny(text, ['full availability', 'open availability', 'seven day roster', '7 day roster', 'any day', 'anytime']);
+  const flexible = hasAny(text, ['part-time', 'part time', 'casual', 'temporary', 'contract', 'flexible', 'negotiable', 'school hours']);
+  const monFriBusinessHours = hasAny(text, ['monday to friday business hours', 'mon-fri business hours', 'monday-friday business hours', 'weekday business hours']);
+  const hardMonFri =
+    hasAny(text, [
+      'must be available monday to friday',
+      'must be available mon-fri',
+      'required monday to friday',
+      'monday to friday required',
+      'available monday to friday',
+      'available mon-fri',
+      '5 days per week',
+      'five days per week',
+    ]) && !flexible;
+  const requiresMonWed = hardMonFri || hasAny(text, ['monday required', 'wednesday required', 'available mondays', 'available wednesdays']);
+  const fullAvailability = hasAny(text, ['full availability required', 'must have full availability', 'open availability', 'seven day roster', '7 day roster', 'any day', 'anytime']);
+  const programmedShiftChoice = hasAny(text, ['programmed', 'real pet food', 'real pet foods']) && hasAny(text, ['day shift', 'afternoon shift', 'night shift']);
 
   if (requiresMonWed) {
     return factor('availability', 'Availability fit', 0, 25, 'Likely conflicts with Monday/Wednesday Avance IT work.');
@@ -163,10 +298,16 @@ function joshAvailability(job: JobRecord): ScoreFactor {
   if (fullAvailability) {
     return factor('availability', 'Availability fit', -15, 25, 'Requires broad open availability, which risks crowding out existing work and family load.');
   }
-  if (hasAny(text, ['thursday', 'friday', 'thu', 'fri', '2 days per week', 'two days per week', '2 days a week'])) {
+  if (hasAny(text, ['thursday', 'friday', 'thu', 'fri', '2 days per week', 'two days per week', '2 days a week', '16 hours', 'part-time negotiable', 'part time negotiable'])) {
     return factor('availability', 'Availability fit', 25, 25, 'Clear Thursday/Friday or two-day availability fit.');
   }
-  if (hasAny(text, ['part-time', 'part time', 'casual', 'temporary', 'contract', 'flexible', 'school hours'])) {
+  if (programmedShiftChoice) {
+    return factor('availability', 'Availability fit', 10, 25, 'Shift options are listed; ask whether Thursday/Friday day shift is available before treating it as a fit.');
+  }
+  if (monFriBusinessHours && flexible) {
+    return factor('availability', 'Availability fit', 10, 25, 'Mon-Fri business-hours wording may only describe operating hours; ask whether Thursday/Friday only is acceptable.');
+  }
+  if (flexible) {
     return factor('availability', 'Availability fit', 18, 25, 'Part-time or casual wording suggests room to negotiate Thursday/Friday.');
   }
   return factor('availability', 'Availability fit', 10, 25, 'Roster is not clear enough yet.');
@@ -257,6 +398,9 @@ function joshIncome(job: JobRecord, settings: ProfileSettings): ScoreFactor {
 
 function joshSustainability(job: JobRecord, settings: ProfileSettings): ScoreFactor {
   const text = lower(getText(job));
+  if (hasAny(text, ['programmed', 'real pet food', 'real pet foods']) && hasAny(text, ['day shift']) && hasAny(text, ['night shift'])) {
+    return factor('sustainability', 'Health/family sustainability', 10, 20, 'Shift options include day and night; only day shift should be considered.');
+  }
   if (hasAny(text, ['night shift', '11pm', 'overnight', 'graveyard'])) {
     const score = settings.joshEmergencyCashflow ? -5 : -25;
     return factor('sustainability', 'Health/family sustainability', score, 20, 'Night shift risks sleep, stress regulation, and family capacity.');
@@ -469,8 +613,17 @@ function summarizeConcern(factors: ScoreFactor[], forcedAvoid: boolean): string 
 
 function joshQuestion(job: JobRecord): string {
   const text = lower(getText(job));
+  if (hasAny(text, ['monday required', 'wednesday required', 'monday to friday', 'mon-fri', 'full availability'])) {
+    return 'Does this role require Monday/Wednesday availability, or could it be worked Thursday/Friday only?';
+  }
+  if (hasAny(text, ['programmed', 'real pet food', 'real pet foods']) && hasAny(text, ['day shift', 'afternoon shift', 'night shift'])) {
+    return 'Which shifts are actually available for this vacancy, and could I do Thursday/Friday day shift only?';
+  }
   if (hasAny(text, ['night', 'afternoon', 'evening', 'on-call', 'on call'])) {
     return 'Could you confirm whether this is strictly day shift, whether any afternoon/night/on-call work is expected, and whether Thursday/Friday availability would be considered?';
+  }
+  if (hasAny(text, ['casual', 'part-time', 'part time', 'flexible', 'negotiable'])) {
+    return 'Would you consider Thursday/Friday only, and is the roster predictable rather than on-call?';
   }
   return 'Would you consider Thursday/Friday availability for this role, and is the roster predictable enough to fit around existing Monday/Wednesday work?';
 }
@@ -479,6 +632,9 @@ function kristyQuestion(job: JobRecord): string {
   const text = lower(getText(job));
   if (detectAgedCare(text)) {
     return 'Could you confirm whether this role is residential aged care, nursing-home, or RACF-based?';
+  }
+  if (hasAny(text, ['clinic', 'practice', 'community', 'hospital', 'casual pool', 'nsw health'])) {
+    return 'Could you confirm the available shifts and whether the role can be worked part-time or casual around family commitments?';
   }
   return 'Could you confirm whether this role is part-time or casual, which shifts are available, and that it is clinic/community/hospital-based rather than aged care?';
 }
@@ -530,6 +686,7 @@ export function scoreJob(job: JobRecord, settings: ProfileSettings = defaultSett
 
   return {
     ...job,
+    extractedFieldConfidence: job.extractedFieldConfidence ?? buildFieldConfidence(job),
     nursingType: job.profileTarget === 'kristy' ? job.nursingType || detectNursingType(getText(job)) : '',
     exclusionsDetected,
     matchScore: scoreBreakdown.total,
@@ -583,6 +740,20 @@ export function createJobFromDraft(draft: JobDraft, settings: ProfileSettings = 
     questionToAsk: '',
     status: 'New',
     viewed: false,
+    extractedFieldConfidence: buildFieldConfidence({
+      title: compact(draft.title) || 'Untitled job lead',
+      employer: compact(draft.employer) || 'Unknown employer',
+      location: compact(draft.location) || 'Dubbo NSW',
+      payRate: compact(draft.payRate),
+      salaryText: compact(draft.salaryText),
+      description: compact(draft.description || importedText),
+      hours: compact(draft.hours),
+      daysRequired: compact(draft.daysRequired),
+      shiftPattern: compact(draft.shiftPattern),
+      workType: compact(draft.workType),
+      closingDate: draft.closingDate,
+      profileTarget: draft.profileTarget,
+    }),
     importedText,
     createdAt: now,
     updatedAt: now,
@@ -615,7 +786,7 @@ export function parseJobText(raw: string, profileTarget: ProfileTarget): JobDraf
     extractLine(raw, ['location', 'suburb']) ||
     (hasAny(raw, ['dubbo']) ? 'Dubbo NSW' : hasAny(raw, ['remote']) ? 'Remote / hybrid' : '');
   const url = raw.match(/https?:\/\/[^\s)]+/i)?.[0] ?? '';
-  const salary = raw.match(/\$[\d,]+(?:\.\d{1,2})?(?:\s*-\s*\$?[\d,]+(?:\.\d{1,2})?)?\s*(?:per hour|\/hour|p\/h|\/hr|hr|hour|per week|weekly|salary)?/i)?.[0] ?? '';
+  const salary = extractPayText(raw);
   const workTypeKeywords = ['part-time', 'part time', 'casual', 'temporary', 'contract', 'full-time', 'full time', 'permanent'];
   const shiftKeywords = ['day shift', 'night shift', 'afternoon shift', 'evening shift', 'weekday', 'rotating roster', 'school hours', 'clinic hours'];
   const days = dayNames.filter((day) => lower(raw).includes(day)).map((day) => `${day[0].toUpperCase()}${day.slice(1)}`);
