@@ -67,6 +67,7 @@ import {
 
 const JOBS_KEY = 'dubbo-job-radar:jobs:v1';
 const SETTINGS_KEY = 'dubbo-job-radar:settings:v1';
+const canSearchAdzunaDirect = Boolean(import.meta.env.VITE_ADZUNA_APP_ID && import.meta.env.VITE_ADZUNA_API_KEY);
 
 type ViewId = 'dashboard' | 'inbox' | 'tracker' | 'helper' | 'cashflow' | 'settings';
 type TargetFilter = 'all' | ProfileTarget;
@@ -1032,6 +1033,12 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
             </select>
             <TextInput label="Search query" value={adzunaQuery} onChange={setAdzunaQuery} />
             <TextInput label="Location" value={adzunaLocation} onChange={setAdzunaLocation} />
+            <p className="text-xs text-slate-500">
+              {canSearchAdzunaDirect
+                ? 'Direct Adzuna search is enabled through VITE_ADZUNA_APP_ID and VITE_ADZUNA_API_KEY.'
+                : 'No direct Adzuna keys found; the app will use the serverless proxy if configured.'}
+              {' '}Search radius: {settings.radiusKm} km.
+            </p>
             <div className="flex flex-wrap gap-2">
               <ActionButton icon={Search} label="Search Adzuna" tone="green" onClick={() => void searchAdzuna()} />
               <ActionButton icon={Plus} label="Import All" tone="sky" onClick={importAllAdzuna} />
