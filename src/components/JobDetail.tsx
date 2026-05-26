@@ -1,5 +1,6 @@
 import { ExternalLink, Mail, MessagesSquare, ShieldCheck, Sparkles } from 'lucide-react';
 import type { JobRecord } from '../types';
+import { makeApplicationDrafts } from '../data/scoring';
 
 interface JobDetailProps {
   job: JobRecord;
@@ -10,6 +11,8 @@ interface JobDetailProps {
 const statusOptions: JobRecord['status'][] = ['New', 'Shortlisted', 'Asked Question', 'Applied', 'Interview', 'Rejected', 'Accepted', 'Archived'];
 
 export function JobDetail({ job, onUpdateStatus, onSaveNotes }: JobDetailProps) {
+  const drafts = makeApplicationDrafts(job);
+
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -55,18 +58,34 @@ export function JobDetail({ job, onUpdateStatus, onSaveNotes }: JobDetailProps) 
           <div className="grid gap-3">
             <div className="rounded-3xl bg-white p-4 shadow-sm">
               <p className="text-sm font-semibold text-slate-900">Short enquiry email</p>
-              <p className="mt-2 text-sm text-slate-700">Hello, I am interested in this role and would like to confirm whether it can be worked on Thursdays/Fridays and whether it is a predictable day-shift arrangement compatible with existing Monday/Wednesday commitments.</p>
+              <pre className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{drafts.enquiryEmail}</pre>
             </div>
             <div className="rounded-3xl bg-white p-4 shadow-sm">
-              <p className="text-sm font-semibold text-slate-900">Application note</p>
-              <p className="mt-2 text-sm text-slate-700">This role appears to fit the profile well. Highlight customer service, Microsoft 365 support, classroom tech experience, and availability for Thursday/Friday day shifts.</p>
+              <p className="text-sm font-semibold text-slate-900">Application email</p>
+              <pre className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{drafts.applicationEmail}</pre>
+            </div>
+            <div className="rounded-3xl bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold text-slate-900">Resume alignment</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                {drafts.resumeAlignment.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
             </div>
             <div className="rounded-3xl bg-white p-4 shadow-sm">
               <p className="text-sm font-semibold text-slate-900">Interview prep</p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
-                <li>Explain how your current Avance IT role is stable and why you are only available Thu/Fri.</li>
-                <li>Describe your experience with helpdesk, Microsoft 365, and training non-technical users.</li>
-                <li>Ask about roster predictability, coaching support, and shift expectations.</li>
+                {drafts.interviewPrep.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-3xl bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold text-slate-900">Acceptance questions</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                {drafts.acceptanceQuestions.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
               </ul>
             </div>
           </div>
