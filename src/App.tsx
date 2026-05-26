@@ -986,6 +986,7 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
   const [refreshTarget, setRefreshTarget] = useState<RefreshTarget>('all');
   const [refreshResults, setRefreshResults] = useState<JobDraft[]>([]);
   const [refreshStatus, setRefreshStatus] = useState('Ready to run Vercel refresh pack');
+  const [refreshDiagnostics, setRefreshDiagnostics] = useState<Array<{ query: string; profileTarget: ProfileTarget; status: string; count: number; error?: string }>>([]);
   const [integrationStatus, setIntegrationStatus] = useState('Integration status not checked yet');
 
   const updateDraft = (patch: Partial<JobDraft>) => setDraft((current) => ({ ...current, ...patch }));
@@ -1038,9 +1039,11 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
       const response = await refreshJobPack(refreshTarget, adzunaLocation, settings.radiusKm);
       const jobs = response.jobs ?? [];
       setRefreshResults(jobs);
+      setRefreshDiagnostics(response.resultsByQuery ?? []);
       setRefreshStatus(response.summary ?? `${jobs.length} leads returned from ${response.queryCount ?? 0} saved searches`);
     } catch (error) {
       setRefreshResults([]);
+      setRefreshDiagnostics([]);
       setRefreshStatus(error instanceof Error ? error.message : 'Unable to run the refresh pack');
     }
   };
@@ -1153,6 +1156,21 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
             </div>
             <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{refreshStatus}</p>
           </div>
+          {refreshDiagnostics.length > 0 && (
+            <div className="mt-4 grid gap-2">
+              <p className="text-xs font-semibold uppercase text-slate-500">Query diagnostics</p>
+              {refreshDiagnostics.map((item) => (
+                <div key={`${item.profileTarget}-${item.query}`} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                  <span className="min-w-0 truncate text-slate-700">
+                    {PROFILE_LABELS[item.profileTarget]} - {item.query}
+                  </span>
+                  <span className={item.status === 'failed' ? 'font-semibold text-rose-700' : 'font-semibold text-slate-700'}>
+                    {item.status === 'failed' ? item.error || 'failed' : `${item.count} found`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {refreshResults.length > 0 && (
             <div className="mt-4 space-y-3">
               {refreshResults.slice(0, 8).map((result) => (

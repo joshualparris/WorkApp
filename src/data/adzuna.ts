@@ -11,6 +11,15 @@ interface RefreshResponse extends AdzunaSearchResponse {
   summary?: string;
   generatedAt?: string;
   queryCount?: number;
+  failureCount?: number;
+  emptyQueryCount?: number;
+  resultsByQuery?: Array<{
+    query: string;
+    profileTarget: ProfileTarget;
+    status: 'ok' | 'ok-after-retry' | 'failed';
+    count: number;
+    error?: string;
+  }>;
 }
 
 export interface JobIntegrationStatus {

@@ -11,6 +11,64 @@ function dedupeJobs(jobs) {
   });
 }
 
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function summarizeError(error) {
+  if (!error) return 'Unknown error';
+  const status = error.statusCode ? `HTTP ${error.statusCode}: ` : '';
+  return `${status}${error.message || 'Adzuna request failed'}`;
+}
+
+async function runQuery(item, location, radiusKm) {
+  try {
+    const jobs = await searchAdzuna({
+      query: item.query,
+      location,
+      profileTarget: item.profileTarget,
+      radiusKm,
+      resultsPerPage: 10,
+    });
+    return {
+      query: item.query,
+      profileTarget: item.profileTarget,
+      status: 'ok',
+      count: jobs.length,
+      jobs,
+    };
+  } catch (firstError) {
+    await wait(1200);
+    try {
+      const jobs = await searchAdzuna({
+        query: item.query,
+        location,
+        profileTarget: item.profileTarget,
+        radiusKm,
+        resultsPerPage: 10,
+      });
+      return {
+        query: item.query,
+        profileTarget: item.profileTarget,
+        status: 'ok-after-retry',
+        count: jobs.length,
+        jobs,
+      };
+    } catch (secondError) {
+      return {
+        query: item.query,
+        profileTarget: item.profileTarget,
+        status: 'failed',
+        count: 0,
+        error: summarizeError(secondError || firstError),
+        jobs: [],
+      };
+    }
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Cache-Control', 's-maxage=900, stale-while-revalidate=3600');
@@ -27,28 +85,29 @@ export default async function handler(req, res) {
     const radiusKm = Math.max(1, Math.min(50, Number(req.query?.radiusKm || 25)));
     const queries = DEFAULT_REFRESH_QUERIES.filter((item) => target === 'all' || item.profileTarget === target);
 
-    const settled = await Promise.allSettled(
-      queries.map((item) =>
-        searchAdzuna({
-          query: item.query,
-          location,
-          profileTarget: item.profileTarget,
-          radiusKm,
-          resultsPerPage: 6,
-        })
-      )
-    );
+    const resultsByQuery = [];
+    for (const item of queries) {
+      resultsByQuery.push(await runQuery(item, location, radiusKm));
+      await wait(350);
+    }
 
-    const jobs = dedupeJobs(settled.flatMap((item) => (item.status === 'fulfilled' ? item.value : [])));
-    const failures = settled.filter((item) => item.status === 'rejected').length;
+    const jobs = dedupeJobs(resultsByQuery.flatMap((item) => item.jobs));
+    const failures = resultsByQuery.filter((item) => item.status === 'failed').length;
+    const zeroes = resultsByQuery.filter((item) => item.status !== 'failed' && item.count === 0).length;
+    const detailParts = [];
+    if (failures) detailParts.push(`${failures} failed`);
+    if (zeroes) detailParts.push(`${zeroes} empty`);
 
     res.statusCode = 200;
     res.end(
       JSON.stringify({
         generatedAt: new Date().toISOString(),
         queryCount: queries.length,
+        failureCount: failures,
+        emptyQueryCount: zeroes,
+        resultsByQuery: resultsByQuery.map(({ jobs: _jobs, ...item }) => item),
         jobs,
-        summary: `${jobs.length} unique leads from ${queries.length} saved searches${failures ? ` (${failures} failed)` : ''}.`,
+        summary: `${jobs.length} unique leads from ${queries.length} saved searches${detailParts.length ? ` (${detailParts.join(', ')})` : ''}.`,
       })
     );
   } catch (error) {
