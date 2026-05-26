@@ -1,16 +1,19 @@
 export const DEFAULT_REFRESH_QUERIES = [
-  { profileTarget: 'josh', query: 'ICT support Dubbo part time' },
-  { profileTarget: 'josh', query: 'IT support Dubbo casual' },
-  { profileTarget: 'josh', query: 'service desk Dubbo' },
-  { profileTarget: 'josh', query: 'administration officer Dubbo part time' },
-  { profileTarget: 'josh', query: 'customer service officer Dubbo part time' },
-  { profileTarget: 'josh', query: 'digital literacy trainer Dubbo' },
-  { profileTarget: 'kristy', query: 'registered nurse Dubbo part time' },
-  { profileTarget: 'kristy', query: 'registered nurse Dubbo casual' },
-  { profileTarget: 'kristy', query: 'practice nurse Dubbo' },
-  { profileTarget: 'kristy', query: 'immunisation nurse Dubbo' },
-  { profileTarget: 'kristy', query: 'community nurse Dubbo' },
-  { profileTarget: 'kristy', query: 'clinic nurse Dubbo' },
+  { profileTarget: 'josh', query: 'ICT support' },
+  { profileTarget: 'josh', query: 'IT support' },
+  { profileTarget: 'josh', query: 'help desk' },
+  { profileTarget: 'josh', query: 'service desk' },
+  { profileTarget: 'josh', query: 'administration officer' },
+  { profileTarget: 'josh', query: 'customer service officer' },
+  { profileTarget: 'josh', query: 'library assistant' },
+  { profileTarget: 'josh', query: 'trainer' },
+  { profileTarget: 'josh', query: 'data entry' },
+  { profileTarget: 'kristy', query: 'registered nurse' },
+  { profileTarget: 'kristy', query: 'practice nurse' },
+  { profileTarget: 'kristy', query: 'clinic nurse' },
+  { profileTarget: 'kristy', query: 'immunisation nurse' },
+  { profileTarget: 'kristy', query: 'community nurse' },
+  { profileTarget: 'kristy', query: 'child family health nurse' },
 ];
 
 const ADZUNA_URL = 'https://api.adzuna.com/v1/api/jobs/au/search/1';
@@ -24,6 +27,15 @@ export function stripHtml(value = '') {
     .replace(/&#39;/g, "'")
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function safeDecode(value = '') {
+  return stripHtml(value)
+    .replace(/\u00e2\u0080[\u0093\u0094]/g, '-')
+    .replace(/\u00e2\u0080\u0099/g, "'")
+    .replace(/\u00e2\u0080[\u009c\u009d]/g, '"')
+    .replace(/\u00e2\u0080\u00a2/g, '-')
+    .replace(/\u00e2\u0080\u00a6/g, '...');
 }
 
 export function normalizeJob(result, profileTarget, sourceDetail) {
@@ -55,9 +67,9 @@ export function normalizeJob(result, profileTarget, sourceDetail) {
     url: result.redirect_url || result.adref || '',
     postedDate: result.created ? String(result.created).slice(0, 10) : '',
     closingDate: '',
-    description: stripHtml(result.description || ''),
-    requirements: stripHtml(result.description || ''),
-    importedText: stripHtml([result.title, company, location, result.description].filter(Boolean).join('\n')),
+    description: safeDecode(result.description || ''),
+    requirements: safeDecode(result.description || ''),
+    importedText: safeDecode([result.title, company, location, result.description].filter(Boolean).join('\n')),
   };
 }
 
@@ -86,11 +98,13 @@ export async function searchAdzuna({ query, location, profileTarget, radiusKm, r
   });
 
   const adzunaResponse = await fetch(`${ADZUNA_URL}?${params.toString()}`);
-  const payload = await adzunaResponse.json();
+  const contentType = adzunaResponse.headers.get('content-type') || '';
+  const payload = contentType.includes('application/json') ? await adzunaResponse.json() : {};
 
   if (!adzunaResponse.ok) {
-    const error = new Error(payload?.error || 'Adzuna request failed.');
+    const error = new Error(payload?.error || `Adzuna request failed for "${query}".`);
     error.statusCode = adzunaResponse.status;
+    error.query = query;
     throw error;
   }
 
