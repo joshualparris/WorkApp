@@ -70,8 +70,8 @@ export const sourcePipeline = [
   },
   {
     name: 'Adzuna API',
-    status: 'Phase 2',
-    detail: 'Serverless endpoint with API keys kept off the browser.',
+    status: 'Live on Vercel',
+    detail: 'Serverless endpoint with API keys kept off the browser. GitHub Pages keeps using manual and CSV imports.',
   },
   {
     name: 'Gmail Job Leads label',

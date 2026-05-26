@@ -242,10 +242,10 @@ export function JobForm({ onSave }: JobFormProps) {
           </label>
           <div className="rounded-3xl bg-white p-4 shadow-sm">
             <p className="text-sm font-semibold text-slate-900">Preview parsed details</p>
-            <p className="mt-2 text-xs text-slate-600">Title: {parsed.title || '–'}</p>
-            <p className="text-xs text-slate-600">Employer: {parsed.employer || '–'}</p>
-            <p className="text-xs text-slate-600">Location: {parsed.location || '–'}</p>
-            <p className="text-xs text-slate-600">URL: {parsed.url || '–'}</p>
+            <p className="mt-2 text-xs text-slate-600">Title: {parsed.title || '-'}</p>
+            <p className="text-xs text-slate-600">Employer: {parsed.employer || '-'}</p>
+            <p className="text-xs text-slate-600">Location: {parsed.location || '-'}</p>
+            <p className="text-xs text-slate-600">URL: {parsed.url || '-'}</p>
           </div>
           <div className="rounded-3xl bg-white p-4 shadow-sm">
             <p className="text-sm font-semibold text-slate-900">Import CSV</p>

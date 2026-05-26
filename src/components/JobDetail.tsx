@@ -18,7 +18,7 @@ export function JobDetail({ job, onUpdateStatus, onSaveNotes }: JobDetailProps) 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-slate-900">{job.title}</p>
-          <p className="text-sm text-slate-600">{job.employer} · {job.location}</p>
+          <p className="text-sm text-slate-600">{job.employer} - {job.location}</p>
         </div>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-800">Status: {job.status}</span>
       </div>

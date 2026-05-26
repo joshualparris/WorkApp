@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Copy,
+  Download,
   DollarSign,
   FileText,
   Filter,
@@ -19,6 +20,7 @@ import {
   MapPin,
   Plus,
   Radar,
+  RefreshCw,
   Save,
   Search,
   Send,
@@ -51,8 +53,8 @@ import {
   parseJobText,
   scoreJob,
 } from './data/scoring';
+import { queryAdzunaJobs } from './data/adzuna';
 import {
-  ApplicationDrafts,
   JOB_STATUSES,
   JobDraft,
   JobFitLabel,
@@ -249,6 +251,136 @@ function csvToDrafts(csv: string, fallbackTarget: ProfileTarget): JobDraft[] {
   });
 }
 
+function downloadText(filename: string, content: string, type = 'text/plain') {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(value: string | number | boolean) {
+  const text = String(value ?? '');
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function jobsToCsv(jobs: JobRecord[]): string {
+  const headers = [
+    'profile',
+    'status',
+    'score',
+    'fitLabel',
+    'title',
+    'employer',
+    'location',
+    'workType',
+    'daysRequired',
+    'shiftPattern',
+    'pay',
+    'postedDate',
+    'closingDate',
+    'source',
+    'url',
+    'bestReason',
+    'biggestConcern',
+    'nextAction',
+    'notes',
+  ];
+  const rows = jobs.map((job) =>
+    [
+      PROFILE_LABELS[job.profileTarget],
+      job.status,
+      job.matchScore,
+      job.fitLabel,
+      job.title,
+      job.employer,
+      job.location,
+      job.workType,
+      job.daysRequired,
+      job.shiftPattern,
+      job.payRate || job.salaryText,
+      job.postedDate,
+      job.closingDate,
+      job.source,
+      job.url,
+      job.fitReason,
+      job.biggestConcern,
+      job.nextAction,
+      job.notes,
+    ].map(csvEscape)
+  );
+  return [headers.map(csvEscape), ...rows].map((row) => row.join(',')).join('\n');
+}
+
+function shortJobLine(job: JobRecord) {
+  const closing = job.closingDate ? `, closes ${formatDate(job.closingDate)}` : '';
+  return `${job.title} - ${job.employer} (${job.matchScore}/100, ${job.fitLabel}${closing})`;
+}
+
+function makeDailyBriefing(jobs: JobRecord[]): string {
+  const active = jobs.filter((job) => job.status !== 'Archived');
+  const topFor = (target: ProfileTarget) =>
+    active
+      .filter((job) => job.profileTarget === target)
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, 5);
+  const closing = active.filter((job) => isClosingSoon(job)).sort((a, b) => b.matchScore - a.matchScore);
+  const questions = active.filter((job) => job.fitLabel === 'Ask questions first').sort((a, b) => b.matchScore - a.matchScore);
+  const lines = [
+    `Dubbo Job Radar briefing - ${formatDate(todayIso())}`,
+    '',
+    'Josh top opportunities:',
+    ...(topFor('josh').length ? topFor('josh').map((job, index) => `${index + 1}. ${shortJobLine(job)}`) : ['No Josh leads yet.']),
+    '',
+    'Kristy top opportunities:',
+    ...(topFor('kristy').length ? topFor('kristy').map((job, index) => `${index + 1}. ${shortJobLine(job)}`) : ['No Kristy leads yet.']),
+    '',
+    'Closing within 3 days:',
+    ...(closing.length ? closing.slice(0, 8).map((job) => `- ${shortJobLine(job)}`) : ['None listed.']),
+    '',
+    'Ask-before-applying queue:',
+    ...(questions.length ? questions.slice(0, 8).map((job) => `- ${job.title}: ${job.questionToAsk}`) : ['No question-first jobs waiting.']),
+  ];
+  return lines.join('\n');
+}
+
+function makeEvidencePack(jobs: JobRecord[], settings: ProfileSettings): string {
+  const active = jobs.filter((job) => job.status !== 'Archived');
+  const contacted = jobs.filter((job) => ['Asked Question', 'Applied', 'Interview', 'Rejected', 'Accepted'].includes(job.status));
+  const lines = [
+    `# Dubbo Job Radar Evidence Pack - ${formatDate(todayIso())}`,
+    '',
+    `Josh income target: $${settings.joshWeeklyIncomeTarget}/week`,
+    `Search radius: ${settings.radiusKm}km`,
+    `Total leads: ${jobs.length}`,
+    `Active leads: ${active.length}`,
+    `Contacted/applied/interviewed: ${contacted.length}`,
+    '',
+    '## Applications And Contacts',
+    '',
+    ...(contacted.length
+      ? contacted.map(
+          (job) =>
+            `- ${PROFILE_LABELS[job.profileTarget]} | ${job.status} | ${job.matchScore}/100 | ${job.title} | ${job.employer} | ${job.location} | ${job.url || 'No URL'}`
+        )
+      : ['No contacted or applied jobs yet.']),
+    '',
+    '## Active Shortlist',
+    '',
+    ...(active.length
+      ? active
+          .sort((a, b) => b.matchScore - a.matchScore)
+          .map(
+            (job) =>
+              `- ${PROFILE_LABELS[job.profileTarget]} | ${job.fitLabel} | ${job.matchScore}/100 | ${job.title} | ${job.employer} | Next: ${job.nextAction}`
+          )
+      : ['No active jobs.']),
+  ];
+  return lines.join('\n');
+}
+
 function App() {
   const [jobs, setJobs] = useState<JobRecord[]>(() => loadJobs());
   const [settings, setSettings] = useState<ProfileSettings>(() => loadSettings());
@@ -367,7 +499,7 @@ function App() {
               </div>
               <div>
                 <h1 className="text-2xl font-semibold tracking-normal text-slate-950">Dubbo Job Radar</h1>
-                <p className="text-sm text-slate-600">Josh and Kristy Parris · Dubbo NSW · Local-first MVP</p>
+                <p className="text-sm text-slate-600">Josh and Kristy Parris - Dubbo NSW - Local-first MVP</p>
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center sm:flex">
@@ -415,6 +547,7 @@ function App() {
 
         {view === 'dashboard' && (
           <Dashboard
+            jobs={jobs}
             stats={stats}
             filters={filters}
             setFilters={setFilters}
@@ -465,7 +598,42 @@ function Metric({ label, value, tone = 'slate' }: { label: string; value: string
   );
 }
 
+function DailyBriefing({ jobs }: { jobs: JobRecord[] }) {
+  const [copied, setCopied] = useState(false);
+  const briefing = useMemo(() => makeDailyBriefing(jobs), [jobs]);
+  const active = jobs.filter((job) => job.status !== 'Archived');
+  const strongest = active.filter((job) => job.matchScore >= 82).length;
+  const needsQuestion = active.filter((job) => job.fitLabel === 'Ask questions first').length;
+
+  const copyBriefing = async () => {
+    await navigator.clipboard?.writeText(briefing);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <SectionTitle icon={ClipboardList} title="Morning Briefing" />
+          <p className="mt-2 text-sm text-slate-600">
+            {active.length} active leads, {strongest} strong fits, {needsQuestion} needing a question before applying.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <ActionButton icon={Copy} label={copied ? 'Copied' : 'Copy Briefing'} tone="slate" onClick={copyBriefing} />
+          <ActionButton icon={Download} label="Download" tone="sky" onClick={() => downloadText(`dubbo-job-briefing-${todayIso()}.txt`, briefing)} />
+        </div>
+      </div>
+      <pre className="mt-4 max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+        {briefing}
+      </pre>
+    </section>
+  );
+}
+
 function Dashboard({
+  jobs,
   stats,
   filters,
   setFilters,
@@ -474,6 +642,7 @@ function Dashboard({
   onSelect,
   onDelete,
 }: {
+  jobs: JobRecord[];
   stats: {
     joshBest: JobRecord[];
     kristyBest: JobRecord[];
@@ -491,6 +660,8 @@ function Dashboard({
 }) {
   return (
     <div className="space-y-6">
+      <DailyBriefing jobs={jobs} />
+
       <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="rounded-lg border border-slate-200 bg-white p-4">
           <div className="mb-4 flex items-center justify-between gap-3">
@@ -743,6 +914,11 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
   const [csv, setCsv] = useState('');
   const [csvTarget, setCsvTarget] = useState<ProfileTarget>('josh');
   const [importCount, setImportCount] = useState(0);
+  const [adzunaQuery, setAdzunaQuery] = useState('ict support');
+  const [adzunaLocation, setAdzunaLocation] = useState('Dubbo NSW');
+  const [adzunaTarget, setAdzunaTarget] = useState<ProfileTarget>('josh');
+  const [adzunaResults, setAdzunaResults] = useState<JobDraft[]>([]);
+  const [adzunaStatus, setAdzunaStatus] = useState('Ready to search');
 
   const updateDraft = (patch: Partial<JobDraft>) => setDraft((current) => ({ ...current, ...patch }));
 
@@ -763,6 +939,32 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
     setImportCount(drafts.length);
     setCsv('');
   };
+
+  const searchAdzuna = async (nextQuery = adzunaQuery, nextTarget = adzunaTarget) => {
+    setAdzunaQuery(nextQuery);
+    setAdzunaTarget(nextTarget);
+    setAdzunaStatus('Loading Adzuna results...');
+    try {
+      const results = await queryAdzunaJobs(nextQuery, adzunaLocation, nextTarget, settings.radiusKm);
+      setAdzunaResults(results);
+      setAdzunaStatus(`${results.length} results found`);
+    } catch (error) {
+      setAdzunaStatus(error instanceof Error ? error.message : 'Unable to fetch Adzuna results');
+      setAdzunaResults([]);
+    }
+  };
+
+  const importAdzuna = (draftItem: JobDraft) => {
+    upsertJob(createJobFromDraft(draftItem, settings));
+    setAdzunaStatus('Imported job from Adzuna');
+  };
+
+  const importAllAdzuna = () => {
+    adzunaResults.forEach((draftItem) => upsertJob(createJobFromDraft(draftItem, settings)));
+    setAdzunaStatus(`Imported ${adzunaResults.length} Adzuna leads`);
+  };
+
+  const quickQueries = searchQueries.filter((query) => query.profileTarget === adzunaTarget).slice(0, 8);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_0.85fr]">
@@ -815,6 +1017,68 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
       <div className="space-y-6">
         <section className="rounded-lg border border-slate-200 bg-white p-4">
           <div className="mb-4 flex items-center justify-between gap-3">
+            <SectionTitle icon={RefreshCw} title="Adzuna API Search" />
+            <span className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-800">Vercel serverless</span>
+          </div>
+          <div className="grid gap-3">
+            <select
+              value={adzunaTarget}
+              onChange={(event) => setAdzunaTarget(event.target.value as ProfileTarget)}
+              className="min-h-10 rounded-md border border-slate-300 px-3 text-sm"
+              aria-label="Adzuna profile target"
+            >
+              <option value="josh">Josh searches</option>
+              <option value="kristy">Kristy searches</option>
+            </select>
+            <TextInput label="Search query" value={adzunaQuery} onChange={setAdzunaQuery} />
+            <TextInput label="Location" value={adzunaLocation} onChange={setAdzunaLocation} />
+            <div className="flex flex-wrap gap-2">
+              <ActionButton icon={Search} label="Search Adzuna" tone="green" onClick={() => void searchAdzuna()} />
+              <ActionButton icon={Plus} label="Import All" tone="sky" onClick={importAllAdzuna} />
+            </div>
+            <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{adzunaStatus}</p>
+          </div>
+
+          <div className="mt-4">
+            <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Quick saved searches</p>
+            <div className="flex flex-wrap gap-2">
+              {quickQueries.map((query) => (
+                <button
+                  key={query.query}
+                  type="button"
+                  onClick={() => void searchAdzuna(query.query, query.profileTarget)}
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {query.query}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {adzunaResults.map((result) => (
+              <div key={`${result.title}-${result.employer}-${result.url}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-slate-950">{result.title}</div>
+                    <div className="text-sm text-slate-600">{result.employer || 'Unknown employer'}</div>
+                    <div className="mt-1 text-xs text-slate-500">{result.location}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => importAdzuna(result)}
+                    className="shrink-0 rounded-md border border-emerald-600 bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-700"
+                  >
+                    Import
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <SectionTitle icon={Upload} title="CSV Import" />
             {importCount > 0 && <span className="text-sm text-emerald-700">{importCount} imported</span>}
           </div>
@@ -830,6 +1094,41 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
             </select>
             <textarea value={csv} onChange={(event) => setCsv(event.target.value)} rows={8} className="resize-y rounded-md border border-slate-300 px-3 py-2 text-sm" />
             <ActionButton icon={Upload} label="Import CSV" tone="green" onClick={importCsv} />
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <SectionTitle icon={Search} title="Adzuna API Search" />
+          <div className="grid gap-3">
+            <TextInput label="Search phrase" value={adzunaQuery} onChange={setAdzunaQuery} />
+            <TextInput label="Location" value={adzunaLocation} onChange={setAdzunaLocation} />
+            <label className="grid gap-1 text-sm font-medium text-slate-700">
+              Profile target
+              <select value={adzunaTarget} onChange={(event) => setAdzunaTarget(event.target.value as ProfileTarget)} className="min-h-10 rounded-md border border-slate-300 px-3 text-sm">
+                <option value="josh">Josh</option>
+                <option value="kristy">Kristy</option>
+              </select>
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <ActionButton icon={Search} label="Fetch from Adzuna" tone="sky" onClick={searchAdzuna} />
+              <span className="text-sm text-slate-600">{adzunaStatus}</span>
+            </div>
+            {adzunaResults.length > 0 && (
+              <div className="space-y-3">
+                {adzunaResults.slice(0, 5).map((item, index) => (
+                  <div key={`${item.title}-${index}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-semibold text-slate-900">{item.title}</div>
+                        <div className="text-sm text-slate-600">{item.employer} - {item.location}</div>
+                      </div>
+                      <button type="button" onClick={() => importAdzuna(item)} className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-500">Import</button>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-600 truncate">{item.description}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 
@@ -1016,7 +1315,7 @@ function HelperView({
         >
           {jobs.map((job) => (
             <option key={job.id} value={job.id}>
-              {PROFILE_LABELS[job.profileTarget]} · {job.title} · {job.matchScore}
+              {PROFILE_LABELS[job.profileTarget]} - {job.title} - {job.matchScore}
             </option>
           ))}
         </select>
@@ -1167,13 +1466,15 @@ function SettingsView({
   setNotice: (notice: string) => void;
 }) {
   const exportData = () => {
-    const blob = new Blob([JSON.stringify({ settings, jobs }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `dubbo-job-radar-${todayIso()}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadText(`dubbo-job-radar-${todayIso()}.json`, JSON.stringify({ settings, jobs }, null, 2), 'application/json');
+  };
+
+  const exportCsv = () => {
+    downloadText(`dubbo-job-radar-${todayIso()}.csv`, jobsToCsv(jobs), 'text/csv');
+  };
+
+  const exportEvidence = () => {
+    downloadText(`dubbo-job-evidence-pack-${todayIso()}.md`, makeEvidencePack(jobs, settings), 'text/markdown');
   };
 
   const clearArchived = () => {
@@ -1222,6 +1523,8 @@ function SettingsView({
         </div>
         <div className="mt-5 flex flex-wrap gap-2">
           <ActionButton icon={FileText} label="Export Data" tone="sky" onClick={exportData} />
+          <ActionButton icon={Download} label="Export CSV" tone="slate" onClick={exportCsv} />
+          <ActionButton icon={ClipboardList} label="Evidence Pack" tone="green" onClick={exportEvidence} />
           <ActionButton icon={Archive} label="Clear Archived" tone="rose" onClick={clearArchived} />
         </div>
       </section>
@@ -1245,7 +1548,7 @@ function SettingsView({
               <div>
                 <div className="font-medium text-slate-950">{query.query}</div>
                 <div className="text-sm text-slate-600">
-                  {PROFILE_LABELS[query.profileTarget]} · {query.priority}
+                  {PROFILE_LABELS[query.profileTarget]} - {query.priority}
                 </div>
               </div>
               <span className={`rounded-md border px-2 py-1 text-xs font-semibold ${targetStyles[query.profileTarget]}`}>{PROFILE_LABELS[query.profileTarget]}</span>

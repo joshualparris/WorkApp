@@ -22,7 +22,7 @@ export function JobCard({ job, onSelect }: JobCardProps) {
           <div>
             <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{job.profileTarget === 'josh' ? 'Josh radar' : 'Kristy radar'}</p>
             <h3 className="text-lg font-semibold text-slate-900">{job.title}</h3>
-            <p className="text-sm text-slate-600">{job.employer} · {job.location}</p>
+            <p className="text-sm text-slate-600">{job.employer} - {job.location}</p>
           </div>
           <div className="flex flex-col items-start gap-2 sm:items-end">
             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${labelStyles[job.fitLabel]}`}>

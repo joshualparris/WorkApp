@@ -19,7 +19,7 @@ export const seedJobs: JobRecord[] = [
     location: 'Dubbo NSW',
     distanceFromDubbo: '5 km',
     workType: 'Part-time',
-    hours: '8:30am–5:00pm',
+    hours: '8:30am-5:00pm',
     daysRequired: 'Thursday, Friday',
     shiftPattern: 'Day shift',
     payRate: '$45/hr',
