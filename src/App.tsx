@@ -1763,7 +1763,62 @@ function SettingsView({
   setNotice: (notice: string) => void;
 }) {
   const exportData = () => {
-    downloadText(`dubbo-job-radar-${todayIso()}.json`, JSON.stringify({ settings, jobs }, null, 2), 'application/json');
+    downloadText(
+      `dubbo-job-radar-${todayIso()}.json`,
+      JSON.stringify(
+        {
+          app: 'dubbo-job-radar',
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          settings,
+          jobs,
+          agencyLeads: loadAgencyLeads(),
+        },
+        null,
+        2
+      ),
+      'application/json'
+    );
+  };
+
+  const restoreData = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+
+      try {
+        const backup = JSON.parse(await file.text()) as {
+          app?: unknown;
+          version?: unknown;
+          settings?: unknown;
+          jobs?: unknown;
+          agencyLeads?: unknown;
+        };
+        if (
+          backup.app !== 'dubbo-job-radar' ||
+          backup.version !== 1 ||
+          !backup.settings ||
+          typeof backup.settings !== 'object' ||
+          !Array.isArray(backup.jobs) ||
+          !Array.isArray(backup.agencyLeads)
+        ) {
+          throw new Error('Unsupported Job Radar backup');
+        }
+
+        const restoredSettings = { ...defaultSettings, ...(backup.settings as Partial<ProfileSettings>) };
+        const restoredJobs = (backup.jobs as JobRecord[]).map((job) => scoreJob(job, restoredSettings));
+        localStorage.setItem(AGENCY_LEADS_KEY, JSON.stringify(backup.agencyLeads));
+        updateSettings(restoredSettings);
+        setJobs(restoredJobs);
+        setNotice(`Backup restored: ${restoredJobs.length} jobs and ${backup.agencyLeads.length} agency leads.`);
+      } catch {
+        setNotice('That file is not a valid Job Radar backup.');
+      }
+    };
+    input.click();
   };
 
   const exportCsv = () => {
@@ -1820,6 +1875,7 @@ function SettingsView({
         </div>
         <div className="mt-5 flex flex-wrap gap-2">
           <ActionButton icon={FileText} label="Export Data" tone="sky" onClick={exportData} />
+          <ActionButton icon={Upload} label="Restore Data" tone="sky" onClick={restoreData} />
           <ActionButton icon={Download} label="Export CSV" tone="slate" onClick={exportCsv} />
           <ActionButton icon={ClipboardList} label="Evidence Pack" tone="green" onClick={exportEvidence} />
           <ActionButton icon={Archive} label="Clear Archived" tone="rose" onClick={clearArchived} />

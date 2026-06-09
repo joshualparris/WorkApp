@@ -11,6 +11,7 @@ Dubbo Job Radar is a local-first React app for Josh and Kristy Parris. It helps 
 - Adzuna live search through Vercel serverless endpoints when credentials are configured.
 - Vercel refresh pack that runs the curated Josh/Kristy search set and returns importable leads.
 - Application tracker, follow-up queue, email helper, cashflow comparison, agency leads tracker, and exports.
+- Portable backup and restore for jobs, profile settings, and agency leads.
 - LocalStorage persistence in the browser. No API keys are stored in browser code.
 
 ## What "Live" Means Today
