@@ -36,14 +36,17 @@ import {
 import {
   joshAvoid,
   joshGoodCategories,
+  joshResumeEvidence,
   joshStrengths,
   kristyAvoid,
   kristyPreferred,
+  kristyResumeEvidence,
   searchQueries,
   sourcePipeline,
 } from './data/content';
 import {
   createJobFromDraft,
+  confidenceSummary,
   defaultSettings,
   emptyDraft,
   estimateWeeklyIncome,
@@ -51,6 +54,7 @@ import {
   makeApplicationDrafts,
   makeDedupeKey,
   parseJobText,
+  parsePayEstimate,
   scoreJob,
 } from './data/scoring';
 import { checkJobIntegrations, queryAdzunaJobs, refreshJobPack } from './data/adzuna';
@@ -67,9 +71,21 @@ import {
 
 const JOBS_KEY = 'dubbo-job-radar:jobs:v1';
 const SETTINGS_KEY = 'dubbo-job-radar:settings:v1';
+const AGENCY_LEADS_KEY = 'dubbo-job-radar:agency-leads:v1';
 
 type ViewId = 'dashboard' | 'inbox' | 'tracker' | 'helper' | 'cashflow' | 'settings';
 type TargetFilter = 'all' | ProfileTarget;
+type AgencyLead = {
+  id: string;
+  agency: string;
+  contact: string;
+  phoneEmail: string;
+  joshRelevance: string;
+  kristyRelevance: string;
+  lastContact: string;
+  nextFollowUp: string;
+  notes: string;
+};
 type RefreshTarget = 'all' | ProfileTarget;
 
 interface Filters {
@@ -127,7 +143,7 @@ const navItems: Array<{ id: ViewId; label: string; icon: LucideIcon }> = [
 const loadJobs = (): JobRecord[] => {
   try {
     const value = localStorage.getItem(JOBS_KEY);
-    return value ? (JSON.parse(value) as JobRecord[]) : [];
+    return value ? (JSON.parse(value) as JobRecord[]).map((job) => scoreJob(job, defaultSettings)) : [];
   } catch {
     return [];
   }
@@ -141,6 +157,42 @@ const loadSettings = (): ProfileSettings => {
     return defaultSettings;
   }
 };
+
+const defaultAgencyLeads = (): AgencyLead[] =>
+  [
+    ['Programmed', 'High: day-shift bridge work', 'Low unless health admin appears'],
+    ['Spinifex Recruiting', 'High: admin, ICT-adjacent, customer service, temp roles', 'Medium: health/admin leads'],
+    ['Haynes People', 'Medium: temp/admin and carefully chosen bridge work', 'Low unless nursing admin appears'],
+    ['Yilabara / Parent Pathways', 'Medium: family-aware employment support', 'Medium: family-aware return-to-work support'],
+    ['Joblink Plus', 'Medium: local employment support and referrals', 'Medium: local employment support'],
+    ['Sureway', 'Medium: local job leads and employer contacts', 'Medium: local job leads'],
+    ['APM', 'Medium: employment services and employer contacts', 'Medium: employment services'],
+    ['NSW Health / I Work for NSW', 'Low for Josh unless admin/ICT appears', 'High: casual pool, clinic, outpatient, child/family health'],
+    ['Dubbo Regional Council', 'Medium: admin/customer/library/ICT leads', 'Low unless community health adjacent'],
+  ].map(([agency, joshRelevance, kristyRelevance]) => ({
+    id: makeAgencyId(agency),
+    agency,
+    contact: '',
+    phoneEmail: '',
+    joshRelevance,
+    kristyRelevance,
+    lastContact: '',
+    nextFollowUp: '',
+    notes: '',
+  }));
+
+function makeAgencyId(seed = 'agency'): string {
+  return `${seed.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function loadAgencyLeads(): AgencyLead[] {
+  try {
+    const value = localStorage.getItem(AGENCY_LEADS_KEY);
+    return value ? (JSON.parse(value) as AgencyLead[]) : defaultAgencyLeads();
+  } catch {
+    return defaultAgencyLeads();
+  }
+}
 
 const textBlob = (job: JobRecord) =>
   [
@@ -865,7 +917,9 @@ function JobCard({
   onSelect: (jobId: string) => void;
   onDelete?: (jobId: string) => void;
 }) {
-  const weekly = estimateWeeklyIncome(job);
+  const payEstimate = parsePayEstimate(job);
+  const weekly = payEstimate.weekly;
+  const confidence = confidenceSummary(job);
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -880,6 +934,7 @@ function JobCard({
             {job.scoreBreakdown.agedCareViolation && (
               <span className="rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">Aged care detected</span>
             )}
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">{confidence}</span>
           </div>
           <h3 className="truncate text-lg font-semibold text-slate-950">{job.title}</h3>
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
@@ -900,6 +955,9 @@ function JobCard({
               {job.payRate || job.salaryText || (weekly ? `$${weekly}/week est.` : 'Pay unknown')}
             </span>
           </div>
+          {weekly && (
+            <p className="mt-2 text-xs text-slate-500">Income estimate: ${weekly}/week using {payEstimate.assumption}.</p>
+          )}
         </div>
         <div className="w-full shrink-0 lg:w-32">
           <div className="flex items-end justify-between">
@@ -912,9 +970,10 @@ function JobCard({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
         <InfoLine label="Best reason" value={job.fitReason} />
         <InfoLine label="Biggest concern" value={job.biggestConcern} />
+        <InfoLine label="Ask first" value={job.questionToAsk} />
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -988,8 +1047,25 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
   const [refreshStatus, setRefreshStatus] = useState('Ready to run Vercel refresh pack');
   const [refreshDiagnostics, setRefreshDiagnostics] = useState<Array<{ query: string; profileTarget: ProfileTarget; status: string; count: number; error?: string }>>([]);
   const [integrationStatus, setIntegrationStatus] = useState('Integration status not checked yet');
+  const [agencyLeads, setAgencyLeads] = useState<AgencyLead[]>(() => loadAgencyLeads());
+  const [agencyDraft, setAgencyDraft] = useState<AgencyLead>({
+    id: makeAgencyId(),
+    agency: '',
+    contact: '',
+    phoneEmail: '',
+    joshRelevance: '',
+    kristyRelevance: '',
+    lastContact: '',
+    nextFollowUp: '',
+    notes: '',
+  });
+
+  useEffect(() => {
+    localStorage.setItem(AGENCY_LEADS_KEY, JSON.stringify(agencyLeads));
+  }, [agencyLeads]);
 
   const updateDraft = (patch: Partial<JobDraft>) => setDraft((current) => ({ ...current, ...patch }));
+  const updateAgencyDraft = (patch: Partial<AgencyLead>) => setAgencyDraft((current) => ({ ...current, ...patch }));
 
   const parse = () => {
     const parsed = parseJobText(draft.importedText || draft.description, draft.profileTarget);
@@ -1067,6 +1143,20 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
     }
   };
 
+  const addAgencyLead = () => {
+    if (!agencyDraft.agency.trim()) return;
+    setAgencyLeads((current) => [{ ...agencyDraft, id: makeAgencyId(agencyDraft.agency) }, ...current]);
+    setAgencyDraft({ id: makeAgencyId(), agency: '', contact: '', phoneEmail: '', joshRelevance: '', kristyRelevance: '', lastContact: '', nextFollowUp: '', notes: '' });
+  };
+
+  const updateAgencyLead = (id: string, patch: Partial<AgencyLead>) => {
+    setAgencyLeads((current) => current.map((lead) => (lead.id === id ? { ...lead, ...patch } : lead)));
+  };
+
+  const removeAgencyLead = (id: string) => {
+    setAgencyLeads((current) => current.filter((lead) => lead.id !== id));
+  };
+
   const quickQueries = searchQueries.filter((query) => query.profileTarget === adzunaTarget).slice(0, 8);
 
   return (
@@ -1075,6 +1165,9 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
         <div className="mb-4 flex items-center justify-between gap-3">
           <SectionTitle icon={Inbox} title="Live Job Feed Inbox" />
           <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">Local import</span>
+        </div>
+        <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+          Manual paste and CSV imports save in this browser. Adzuna search and refresh packs are live when Vercel env vars are configured, but scheduled cron runs do not auto-save into your browser yet. True background updates need durable backend storage plus notifications.
         </div>
         <div className="grid gap-3">
           <label className="grid gap-1 text-sm font-medium text-slate-700">
@@ -1239,6 +1332,11 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
           </div>
 
           <div className="mt-4 space-y-3">
+            {adzunaResults.length === 0 && adzunaStatus !== 'Ready to search' && (
+              <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
+                No Adzuna leads are ready to import for this query yet.
+              </div>
+            )}
             {adzunaResults.map((result) => (
               <div key={`${result.title}-${result.employer}-${result.url}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -1281,37 +1379,52 @@ function InboxView({ settings, upsertJob }: { settings: ProfileSettings; upsertJ
         </section>
 
         <section className="rounded-lg border border-slate-200 bg-white p-4">
-          <SectionTitle icon={Search} title="Adzuna API Search" />
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <SectionTitle icon={Briefcase} title="Agency Leads" />
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">Local tracker</span>
+          </div>
           <div className="grid gap-3">
-            <TextInput label="Search phrase" value={adzunaQuery} onChange={setAdzunaQuery} />
-            <TextInput label="Location" value={adzunaLocation} onChange={setAdzunaLocation} />
-            <label className="grid gap-1 text-sm font-medium text-slate-700">
-              Profile target
-              <select value={adzunaTarget} onChange={(event) => setAdzunaTarget(event.target.value as ProfileTarget)} className="min-h-10 rounded-md border border-slate-300 px-3 text-sm">
-                <option value="josh">Josh</option>
-                <option value="kristy">Kristy</option>
-              </select>
-            </label>
-            <div className="flex flex-wrap items-center gap-3">
-              <ActionButton icon={Search} label="Fetch from Adzuna" tone="sky" onClick={searchAdzuna} />
-              <span className="text-sm text-slate-600">{adzunaStatus}</span>
+            <TextInput label="Agency" value={agencyDraft.agency} onChange={(value) => updateAgencyDraft({ agency: value })} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TextInput label="Contact person" value={agencyDraft.contact} onChange={(value) => updateAgencyDraft({ contact: value })} />
+              <TextInput label="Phone/email" value={agencyDraft.phoneEmail} onChange={(value) => updateAgencyDraft({ phoneEmail: value })} />
+              <TextInput label="Josh relevance" value={agencyDraft.joshRelevance} onChange={(value) => updateAgencyDraft({ joshRelevance: value })} />
+              <TextInput label="Kristy relevance" value={agencyDraft.kristyRelevance} onChange={(value) => updateAgencyDraft({ kristyRelevance: value })} />
+              <TextInput label="Last contact" type="date" value={agencyDraft.lastContact} onChange={(value) => updateAgencyDraft({ lastContact: value })} />
+              <TextInput label="Next follow-up" type="date" value={agencyDraft.nextFollowUp} onChange={(value) => updateAgencyDraft({ nextFollowUp: value })} />
             </div>
-            {adzunaResults.length > 0 && (
-              <div className="space-y-3">
-                {adzunaResults.slice(0, 5).map((item, index) => (
-                  <div key={`${item.title}-${index}`} className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-semibold text-slate-900">{item.title}</div>
-                        <div className="text-sm text-slate-600">{item.employer} - {item.location}</div>
-                      </div>
-                      <button type="button" onClick={() => importAdzuna(item)} className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-500">Import</button>
-                    </div>
-                    <p className="mt-2 text-sm text-slate-600 truncate">{item.description}</p>
+            <label className="grid gap-1 text-sm font-medium text-slate-700">
+              Notes
+              <textarea value={agencyDraft.notes} onChange={(event) => updateAgencyDraft({ notes: event.target.value })} rows={3} className="resize-y rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            </label>
+            <ActionButton icon={Plus} label="Add Agency Lead" tone="green" onClick={addAgencyLead} />
+          </div>
+          <div className="mt-4 space-y-3">
+            {agencyLeads.map((lead) => (
+              <div key={lead.id} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold text-slate-950">{lead.agency}</div>
+                    <div className="text-sm text-slate-600">{lead.contact || 'No contact yet'}{lead.phoneEmail ? ` - ${lead.phoneEmail}` : ''}</div>
                   </div>
-                ))}
+                  <button type="button" onClick={() => removeAgencyLead(lead.id)} className="shrink-0 rounded-md border border-rose-300 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-800 hover:bg-rose-100">
+                    Remove
+                  </button>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <TextInput label="Contact person" value={lead.contact} onChange={(value) => updateAgencyLead(lead.id, { contact: value })} />
+                  <TextInput label="Phone/email" value={lead.phoneEmail} onChange={(value) => updateAgencyLead(lead.id, { phoneEmail: value })} />
+                  <TextInput label="Josh relevance" value={lead.joshRelevance} onChange={(value) => updateAgencyLead(lead.id, { joshRelevance: value })} />
+                  <TextInput label="Kristy relevance" value={lead.kristyRelevance} onChange={(value) => updateAgencyLead(lead.id, { kristyRelevance: value })} />
+                  <TextInput label="Last contact" type="date" value={lead.lastContact} onChange={(value) => updateAgencyLead(lead.id, { lastContact: value })} />
+                  <TextInput label="Next follow-up" type="date" value={lead.nextFollowUp} onChange={(value) => updateAgencyLead(lead.id, { nextFollowUp: value })} />
+                </div>
+                <label className="mt-2 grid gap-1 text-sm font-medium text-slate-700">
+                  Notes
+                  <textarea value={lead.notes} onChange={(event) => updateAgencyLead(lead.id, { notes: event.target.value })} rows={2} className="resize-y rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                </label>
               </div>
-            )}
+            ))}
           </div>
         </section>
 
@@ -1657,6 +1770,33 @@ function SettingsView({
     downloadText(`dubbo-job-radar-${todayIso()}.csv`, jobsToCsv(jobs), 'text/csv');
   };
 
+  const importData = async (file: File) => {
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Backup file is not valid JSON.')
+      }
+      const { settings: importedSettings, jobs: importedJobs } = parsed as {
+        settings?: Partial<ProfileSettings>;
+        jobs?: JobRecord[];
+      };
+      if (!Array.isArray(importedJobs)) {
+        throw new Error('Backup file does not contain job records.')
+      }
+      if (!importedJobs.every((job) => typeof job.id === 'string')) {
+        throw new Error('Backup file appears malformed.')
+      }
+      setJobs(importedJobs.map((job) => scoreJob(job, { ...defaultSettings, ...importedSettings })));
+      if (importedSettings) {
+        updateSettings({ ...settings, ...importedSettings });
+      }
+      setNotice('Backup JSON imported successfully.')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not import backup file.')
+    }
+  }
+
   const exportEvidence = () => {
     downloadText(`dubbo-job-evidence-pack-${todayIso()}.md`, makeEvidencePack(jobs, settings), 'text/markdown');
   };
@@ -1707,6 +1847,19 @@ function SettingsView({
         </div>
         <div className="mt-5 flex flex-wrap gap-2">
           <ActionButton icon={FileText} label="Export Data" tone="sky" onClick={exportData} />
+          <label className="flex items-center rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-900 hover:bg-slate-100 cursor-pointer">
+            <input
+              type="file"
+              accept="application/json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) void importData(file)
+                event.target.value = ''
+              }}
+            />
+            Import JSON
+          </label>
           <ActionButton icon={Download} label="Export CSV" tone="slate" onClick={exportCsv} />
           <ActionButton icon={ClipboardList} label="Evidence Pack" tone="green" onClick={exportEvidence} />
           <ActionButton icon={Archive} label="Clear Archived" tone="rose" onClick={clearArchived} />
@@ -1717,9 +1870,11 @@ function SettingsView({
         <SectionTitle icon={UserRound} title="Profile Rules" />
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <RuleBlock title="Josh Strengths" items={joshStrengths} />
+          <RuleBlock title="Josh Resume Evidence" items={joshResumeEvidence} />
           <RuleBlock title="Josh Good Categories" items={joshGoodCategories} />
           <RuleBlock title="Josh Penalised" items={joshAvoid} tone="rose" />
           <RuleBlock title="Kristy Preferred" items={kristyPreferred} />
+          <RuleBlock title="Kristy Resume Evidence" items={kristyResumeEvidence} />
           <RuleBlock title="Kristy Exclusions" items={kristyAvoid} tone="rose" />
         </div>
       </section>
