@@ -1,5 +1,6 @@
-import { ArrowRight, CalendarDays, Clock3, MapPin, Sparkles } from 'lucide-react';
+import { ArrowRight, CalendarDays, Clock3, MapPin, Sparkles, Share2, Check } from 'lucide-react';
 import type { JobRecord } from '../types';
+import { useState } from 'react';
 
 interface JobCardProps {
   job: JobRecord;
@@ -15,6 +16,25 @@ const labelStyles = {
 };
 
 export function JobCard({ job, onSelect }: JobCardProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = () => {
+    const text = `
+📢 Job Lead: ${job.title}
+🏢 Employer: ${job.employer}
+📍 Location: ${job.location}
+⚖️ Fit: ${job.fitLabel} (Score ${job.matchScore})
+📝 Why: ${job.fitReason}
+🕒 Roster: ${job.shiftPattern || 'Not specified'}
+🔗 Link: ${job.url || 'No link provided'}
+    `.trim();
+    
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
     <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg">
       <div className="flex flex-col gap-4">
@@ -38,13 +58,23 @@ export function JobCard({ job, onSelect }: JobCardProps) {
           <p className="text-sm text-slate-600"><CalendarDays className="inline h-4 w-4 align-text-bottom text-slate-500" /> {job.closingDate ? `Closing ${job.closingDate}` : 'Closing date unknown'}</p>
         </div>
         <div className="flex items-center justify-between gap-3 pt-2">
-          <button
-            type="button"
-            onClick={() => onSelect(job)}
-            className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
-          >
-            View details <ArrowRight className="h-4 w-4" />
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => onSelect(job)}
+              className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+            >
+              View details <ArrowRight className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleShare}
+              title="Copy summary to clipboard"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+            >
+              {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Share2 className="h-4 w-4" />}
+            </button>
+          </div>
           <span className="text-xs uppercase tracking-[0.18em] text-slate-500">{job.status}</span>
         </div>
       </div>

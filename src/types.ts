@@ -38,6 +38,18 @@ export interface ScoreBreakdown {
   agedCareViolation: boolean;
 }
 
+export type FieldConfidenceLevel = 'high' | 'medium' | 'low';
+
+export interface ExtractedFieldConfidence {
+  title: FieldConfidenceLevel;
+  employer: FieldConfidenceLevel;
+  location: FieldConfidenceLevel;
+  pay: FieldConfidenceLevel;
+  roster: FieldConfidenceLevel;
+  days: FieldConfidenceLevel;
+  closingDate: FieldConfidenceLevel;
+}
+
 export interface JobRecord {
   id: string;
   profileTarget: ProfileTarget;
@@ -69,6 +81,7 @@ export interface JobRecord {
   questionToAsk: string;
   status: JobStatus;
   viewed: boolean;
+  extractedFieldConfidence?: ExtractedFieldConfidence;
   importedText: string;
   createdAt: string;
   updatedAt: string;
